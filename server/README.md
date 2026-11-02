@@ -28,3 +28,27 @@ Set `DATABASE_URL` only when connecting to a non-default host or using a URL dif
 `stations` stores each configured location. `air_quality_readings` is a TimescaleDB hypertable partitioned by `observed_at`, with a unique station/timestamp key and nullable pollutant values for missing API data.
 
 The API source and supported variables are documented at [Open-Meteo Air Quality API](https://open-meteo.com/en/docs/air-quality-api).
+
+## REST API
+
+Start the server from `server/` with `npm run dev`. The default base URL is `http://localhost:3000`.
+
+- `GET /health` checks that the HTTP server is running.
+- `GET /api/v1/stations` returns configured stations with their coordinates.
+- `GET /api/v1/metrics` returns one record per station and hourly timestamp, including coordinates and PM2.5, PM10, NO2, and O3 values. The default time range is the previous 24 hours.
+
+The metrics endpoint accepts these optional query parameters:
+
+| Parameter | Meaning |
+| --- | --- |
+| `from` | Inclusive start time as an RFC 3339 timestamp with timezone. Must be provided together with `to`. |
+| `to` | Exclusive end time as an RFC 3339 timestamp with timezone. Must be provided together with `from`. |
+| `stationId` | Restrict results to a station ID, such as `madrid`. |
+
+For example:
+
+```text
+GET /api/v1/metrics?from=2026-11-01T00:00:00Z&to=2026-11-02T00:00:00Z&stationId=madrid
+```
+
+Successful responses have a `data` array and `meta` with the effective time interval and record count. Invalid query parameters return HTTP 400; unexpected server or database errors return HTTP 500.

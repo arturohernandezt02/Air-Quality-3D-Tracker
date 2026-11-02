@@ -1,0 +1,189 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createApp } from "../app.js";
+import type {
+  AirQualityRepository,
+  MetricRecord,
+  MetricsQuery,
+  StationRecord,
+} from "../db/repository.js";
+
+const now = new Date("2026-11-02T18:00:00.000Z");
+const station: StationRecord = {
+  id: "madrid",
+  name: "Madrid",
+  country: "Spain",
+  latitude: 40.4168,
+  longitude: -3.7038,
+};
+const reading: MetricRecord = {
+  ...station,
+  observedAt: new Date("2026-11-02T17:00:00.000Z"),
+  pm2_5: 12.4,
+  pm10: 21.1,
+  nitrogen_dioxide: 4.5,
+  ozone: 32.7,
+};
+
+function createRepository(
+  metrics: MetricRecord[] = [reading],
+): AirQualityRepository & { lastQuery?: MetricsQuery } {
+  const repository: AirQualityRepository & { lastQuery?: MetricsQuery } = {
+    async listStations() {
+      return [station];
+    },
+    async listMetrics(query) {
+      repository.lastQuery = query;
+      return metrics;
+    },
+  };
+  return repository;
+}
+
+function createTestApp(repository: AirQualityRepository) {
+  const app = createApp(repository, () => now);
+  app.log.level = "silent";
+  return app;
+}
+
+test("GET /api/v1/stations returns known locations", async () => {
+  const app = createTestApp(createRepository());
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/stations",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { data: [station] });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /health continues to report server status", async () => {
+  const app = createTestApp(createRepository());
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/health",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { status: "ok" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/v1/metrics returns map coordinates and hourly pollutant values", async () => {
+  const repository = createRepository();
+  const app = createTestApp(repository);
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/metrics",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      data: [
+        {
+          stationId: "madrid",
+          name: "Madrid",
+          country: "Spain",
+          latitude: 40.4168,
+          longitude: -3.7038,
+          observedAt: "2026-11-02T17:00:00.000Z",
+          metrics: {
+            pm2_5: 12.4,
+            pm10: 21.1,
+            nitrogen_dioxide: 4.5,
+            ozone: 32.7,
+          },
+        },
+      ],
+      meta: {
+        from: "2026-11-01T18:00:00.000Z",
+        to: "2026-11-02T18:00:00.000Z",
+        interval: "[from, to)",
+        count: 1,
+      },
+    });
+    assert.deepEqual(repository.lastQuery, {
+      from: new Date("2026-11-01T18:00:00.000Z"),
+      to: now,
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/v1/metrics applies an explicit time range and station filter", async () => {
+  const repository = createRepository([]);
+  const app = createTestApp(repository);
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/metrics?from=2026-11-01T00%3A00%3A00Z&to=2026-11-02T00%3A00%3A00Z&stationId=madrid",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(repository.lastQuery, {
+      from: new Date("2026-11-01T00:00:00.000Z"),
+      to: new Date("2026-11-02T00:00:00.000Z"),
+      stationId: "madrid",
+    });
+    assert.equal(response.json().meta.count, 0);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/v1/metrics rejects incomplete, invalid, and reversed time ranges", async () => {
+  const repository = createRepository();
+  const app = createTestApp(repository);
+  try {
+    const cases = [
+      "/api/v1/metrics?from=2026-11-01T00%3A00%3A00Z",
+      "/api/v1/metrics?from=not-a-date&to=2026-11-02T00%3A00%3A00Z",
+      "/api/v1/metrics?from=2026-02-30T00%3A00%3A00Z&to=2026-03-02T00%3A00%3A00Z",
+      "/api/v1/metrics?from=2026-11-02T00%3A00%3A00Z&to=2026-11-01T00%3A00%3A00Z",
+      "/api/v1/metrics?unexpected=value",
+    ];
+
+    for (const url of cases) {
+      const response = await app.inject({ method: "GET", url });
+      assert.equal(response.statusCode, 400, url);
+      assert.equal(response.json().error.code, "INVALID_QUERY", url);
+    }
+
+    assert.equal(repository.lastQuery, undefined);
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/v1/metrics returns a generic server error when the repository fails", async () => {
+  const repository = createRepository();
+  repository.listMetrics = async () => {
+    throw new Error("database credentials must not be exposed");
+  };
+  const app = createTestApp(repository);
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/metrics",
+    });
+
+    assert.equal(response.statusCode, 500);
+    assert.deepEqual(response.json(), {
+      error: {
+        code: "INTERNAL_SERVER_ERROR",
+        message: "An unexpected error occurred.",
+      },
+    });
+  } finally {
+    await app.close();
+  }
+});
