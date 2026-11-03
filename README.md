@@ -4,6 +4,8 @@ Proyecto de portafolio para explorar estimaciones horarias de calidad del aire c
 
 Open-Meteo entrega estimaciones basadas en modelos, no mediciones directas de estaciones. La aplicación comienza con tres ubicaciones de ejemplo —Ciudad de México, Madrid y Buenos Aires— y muestra PM2.5, PM10, NO₂ y O₃.
 
+<img width="1359" height="636" alt="AirQualityGif" src="https://github.com/user-attachments/assets/f2fcaaf3-dc41-407f-87cf-7446e88539ad" />
+
 ## Arquitectura actual
 
 - `server/`: API REST Fastify, acceso PostgreSQL con Kysely, ingesta bajo demanda desde Open-Meteo y esquema TimescaleDB.
