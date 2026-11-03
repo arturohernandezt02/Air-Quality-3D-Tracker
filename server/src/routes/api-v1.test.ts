@@ -76,6 +76,28 @@ test("GET /health continues to report server status", async () => {
   }
 });
 
+test("API allows the configured frontend origin", async () => {
+  const app = createTestApp(createRepository());
+  try {
+    const response = await app.inject({
+      method: "OPTIONS",
+      url: "/api/v1/stations",
+      headers: {
+        origin: "http://localhost:5173",
+        "access-control-request-method": "GET",
+      },
+    });
+
+    assert.equal(response.statusCode, 204);
+    assert.equal(
+      response.headers["access-control-allow-origin"],
+      "http://localhost:5173",
+    );
+  } finally {
+    await app.close();
+  }
+});
+
 test("GET /api/v1/metrics returns map coordinates and hourly pollutant values", async () => {
   const repository = createRepository();
   const app = createTestApp(repository);

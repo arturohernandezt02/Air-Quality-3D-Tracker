@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import cors from "@fastify/cors";
 import type { AirQualityRepository } from "./db/repository.js";
 import { createApiV1Routes } from "./routes/api-v1.js";
 
@@ -10,7 +11,12 @@ export function createApp(
     logger: true,
     ajv: { customOptions: { removeAdditional: false } },
   });
+  const allowedOrigins = (process.env.FRONTEND_ORIGIN ?? "http://localhost:5173")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
 
+  app.register(cors, { origin: allowedOrigins });
   app.get("/health", async () => ({ status: "ok" }));
   app.register(createApiV1Routes(repository, now), { prefix: "/api/v1" });
 
