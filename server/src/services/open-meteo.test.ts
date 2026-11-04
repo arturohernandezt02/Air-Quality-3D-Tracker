@@ -1,6 +1,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseHourlyObservations } from "./open-meteo.js";
+import {
+  buildAirQualityUrl,
+  parseHourlyObservations,
+} from "./open-meteo.js";
+
+test("requests 72 hours so the 48-hour dashboard window is fully covered", () => {
+  const url = buildAirQualityUrl({
+    id: "madrid",
+    name: "Madrid",
+    country: "Spain",
+    latitude: 40.4168,
+    longitude: -3.7038,
+  });
+
+  assert.equal(
+    url.origin + url.pathname,
+    "https://air-quality-api.open-meteo.com/v1/air-quality",
+  );
+  assert.equal(url.searchParams.get("latitude"), "40.4168");
+  assert.equal(url.searchParams.get("longitude"), "-3.7038");
+  assert.equal(
+    url.searchParams.get("hourly"),
+    "pm2_5,pm10,nitrogen_dioxide,ozone",
+  );
+  assert.equal(url.searchParams.get("past_days"), "2");
+  assert.equal(url.searchParams.get("forecast_days"), "1");
+  assert.equal(url.searchParams.get("timezone"), "UTC");
+  assert.equal(url.searchParams.get("timeformat"), "unixtime");
+});
 
 test("parses hourly pollutant values and Unix timestamps", () => {
   const observations = parseHourlyObservations({

@@ -95,18 +95,25 @@ export function parseHourlyObservations(payload: unknown): HourlyObservation[] {
   });
 }
 
-export async function fetchHourlyObservations(
-  location: AirQualityLocation,
-): Promise<HourlyObservation[]> {
+export function buildAirQualityUrl(location: AirQualityLocation): URL {
   const url = new URL(AIR_QUALITY_API_URL);
   url.searchParams.set("latitude", String(location.latitude));
   url.searchParams.set("longitude", String(location.longitude));
   url.searchParams.set("hourly", "pm2_5,pm10,nitrogen_dioxide,ozone");
-  url.searchParams.set("past_days", "1");
+  // Request 72 hours (the two previous days plus the current day) so the
+  // client's 48-hour window is fully covered even on the first ingestion.
+  url.searchParams.set("past_days", "2");
   url.searchParams.set("forecast_days", "1");
   url.searchParams.set("timezone", "UTC");
   url.searchParams.set("timeformat", "unixtime");
 
+  return url;
+}
+
+export async function fetchHourlyObservations(
+  location: AirQualityLocation,
+): Promise<HourlyObservation[]> {
+  const url = buildAirQualityUrl(location);
   const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
   const responseBody = await response.text();
 

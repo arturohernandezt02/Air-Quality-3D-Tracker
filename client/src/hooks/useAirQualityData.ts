@@ -1,17 +1,30 @@
 import { useCallback, useEffect, useState } from "react";
+import { AQI_CATEGORY_KEYS } from "../lib/aqi";
 import type {
+  AirQualityAqi,
+  AirQualityFreshness,
   AirQualityReading,
   AirQualityStation,
+  AqiCategory,
+  MetricKey,
 } from "../types/air-quality";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ?? "/api/v1"
 ).replace(/\/+$/, "");
+const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const METRIC_KEYS = [
+  "pm2_5",
+  "pm10",
+  "nitrogen_dioxide",
+  "ozone",
+] as const satisfies readonly MetricKey[];
 
 interface AirQualityDataState {
   requestKey: string;
   stations: AirQualityStation[];
   readings: AirQualityReading[];
+  freshness: AirQualityFreshness | null;
   error: string | null;
   updatedAt: Date | null;
 }
@@ -43,13 +56,77 @@ function parseStation(value: unknown): AirQualityStation {
   };
 }
 
+function isMetricKey(value: unknown): value is MetricKey {
+  return (
+    typeof value === "string" &&
+    (METRIC_KEYS as readonly string[]).includes(value)
+  );
+}
+
+function isAqiCategory(value: unknown): value is AqiCategory {
+  return (
+    typeof value === "string" &&
+    (AQI_CATEGORY_KEYS as string[]).includes(value)
+  );
+}
+
+function parseNullableIndex(value: unknown): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error("La API devolvió un índice AQI con formato inválido.");
+  }
+
+  return value;
+}
+
+function parseAqi(value: unknown): AirQualityAqi {
+  if (!isRecord(value) || !isRecord(value.pollutants)) {
+    throw new Error("La API devolvió un índice AQI con formato inválido.");
+  }
+
+  const pollutants: AirQualityAqi["pollutants"] = {
+    pm2_5: null,
+    pm10: null,
+    nitrogen_dioxide: null,
+    ozone: null,
+  };
+  for (const key of METRIC_KEYS) {
+    pollutants[key] = parseNullableIndex(value.pollutants[key]);
+  }
+
+  const index = parseNullableIndex(value.value);
+  let category: AqiCategory | null;
+  if (value.category === null) {
+    category = null;
+  } else if (isAqiCategory(value.category)) {
+    category = value.category;
+  } else {
+    throw new Error("La API devolvió una categoría AQI desconocida.");
+  }
+
+  let dominantPollutant: MetricKey | null;
+  if (value.dominantPollutant === null) {
+    dominantPollutant = null;
+  } else if (isMetricKey(value.dominantPollutant)) {
+    dominantPollutant = value.dominantPollutant;
+  } else {
+    throw new Error("La API devolvió un contaminante dominante inválido.");
+  }
+
+  if (
+    (index === null) !== (category === null) ||
+    (index === null) !== (dominantPollutant === null)
+  ) {
+    throw new Error("La API devolvió un índice AQI incoherente.");
+  }
+
+  return { value: index, category, dominantPollutant, pollutants };
+}
+
 function parseReading(value: unknown): AirQualityReading {
-  const metricKeys = [
-    "pm2_5",
-    "pm10",
-    "nitrogen_dioxide",
-    "ozone",
-  ] as const;
   if (
     !isRecord(value) ||
     !isRecord(value.metrics) ||
@@ -72,7 +149,7 @@ function parseReading(value: unknown): AirQualityReading {
     nitrogen_dioxide: null,
     ozone: null,
   };
-  for (const key of metricKeys) {
+  for (const key of METRIC_KEYS) {
     const metric = value.metrics[key];
     if (
       metric !== null &&
@@ -91,6 +168,7 @@ function parseReading(value: unknown): AirQualityReading {
     longitude: value.longitude,
     observedAt: value.observedAt,
     metrics,
+    aqi: parseAqi(value.aqi),
   };
 }
 
@@ -103,6 +181,61 @@ function parseDataArray<T>(
   }
 
   return payload.data.map(parseItem);
+}
+
+function parseNullableTimestamp(
+  value: unknown,
+  field: string,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new Error(
+      `La API devolvió el campo de frescura "${field}" con formato inválido.`,
+    );
+  }
+
+  return value;
+}
+
+function parseFreshness(payload: unknown): AirQualityFreshness {
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    throw new Error("La API devolvió una respuesta de frescura inválida.");
+  }
+
+  const data = payload.data;
+  const ageMinutes = data.ageMinutes;
+  const staleAfterMinutes = data.staleAfterMinutes;
+  const isStale = data.isStale;
+  if (
+    (ageMinutes !== null &&
+      (typeof ageMinutes !== "number" ||
+        !Number.isFinite(ageMinutes) ||
+        ageMinutes < 0)) ||
+    typeof staleAfterMinutes !== "number" ||
+    !Number.isFinite(staleAfterMinutes) ||
+    staleAfterMinutes < 1 ||
+    typeof isStale !== "boolean"
+  ) {
+    throw new Error("La API devolvió una respuesta de frescura inválida.");
+  }
+
+  return {
+    latestObservation: parseNullableTimestamp(
+      data.latestObservation,
+      "latestObservation",
+    ),
+    lastIngestedAt: parseNullableTimestamp(
+      data.lastIngestedAt,
+      "lastIngestedAt",
+    ),
+    lastAttemptAt: parseNullableTimestamp(data.lastAttemptAt, "lastAttemptAt"),
+    ageMinutes,
+    staleAfterMinutes,
+    isStale,
+  };
 }
 
 async function fetchApi(url: string, signal: AbortSignal): Promise<unknown> {
@@ -150,6 +283,7 @@ export function useAirQualityData(
     requestKey: "",
     stations: [],
     readings: [],
+    freshness: null,
     error: null,
     updatedAt: null,
   });
@@ -173,12 +307,14 @@ export function useAirQualityData(
         `${API_BASE_URL}/metrics?${query.toString()}`,
         controller.signal,
       ),
+      fetchApi(`${API_BASE_URL}/freshness`, controller.signal),
     ])
-      .then(([stationsResponse, metricsResponse]) => {
+      .then(([stationsResponse, metricsResponse, freshnessResponse]) => {
         setState({
           requestKey,
           stations: parseDataArray(stationsResponse, parseStation),
           readings: parseDataArray(metricsResponse, parseReading),
+          freshness: parseFreshness(freshnessResponse),
           error: null,
           updatedAt: new Date(),
         });
@@ -203,6 +339,14 @@ export function useAirQualityData(
 
   const refresh = useCallback(() => {
     setRefreshVersion((version) => version + 1);
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setRefreshVersion((version) => version + 1);
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   const { requestKey: completedRequestKey, ...data } = state;

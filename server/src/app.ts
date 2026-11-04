@@ -3,10 +3,21 @@ import cors from "@fastify/cors";
 import type { AirQualityRepository } from "./db/repository.js";
 import { createApiV1Routes } from "./routes/api-v1.js";
 
+export type ReadinessCheck = () => Promise<void>;
+
+export interface AppOptions {
+  checkReadiness?: ReadinessCheck;
+  staleAfterMinutes?: number;
+}
+
+const defaultReadinessCheck: ReadinessCheck = async () => {};
+
 export function createApp(
   repository: AirQualityRepository,
   now: () => Date = () => new Date(),
+  options: AppOptions = {},
 ) {
+  const checkReadiness = options.checkReadiness ?? defaultReadinessCheck;
   const app = Fastify({
     logger: true,
     ajv: { customOptions: { removeAdditional: false } },
@@ -18,7 +29,23 @@ export function createApp(
 
   app.register(cors, { origin: allowedOrigins });
   app.get("/health", async () => ({ status: "ok" }));
-  app.register(createApiV1Routes(repository, now), { prefix: "/api/v1" });
+  app.get("/ready", async (request, reply) => {
+    try {
+      await checkReadiness();
+      return { status: "ready" };
+    } catch (error) {
+      request.log.error({ err: error }, "Readiness check failed.");
+      return reply.code(503).send({
+        error: {
+          code: "NOT_READY",
+          message: "Database is not available.",
+        },
+      });
+    }
+  });
+  app.register(createApiV1Routes(repository, now, {
+    staleAfterMinutes: options.staleAfterMinutes,
+  }), { prefix: "/api/v1" });
 
   app.setErrorHandler((error, request, reply) => {
     if (

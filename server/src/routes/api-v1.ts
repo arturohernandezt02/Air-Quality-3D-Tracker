@@ -3,12 +3,19 @@ import type {
   AirQualityRepository,
   MetricsQuery,
 } from "../db/repository.js";
+import { computeAqi } from "../services/aqi.js";
 
 interface MetricsQuerystring {
   from?: string;
   to?: string;
   stationId?: string;
 }
+
+export interface ApiV1Options {
+  staleAfterMinutes?: number;
+}
+
+const DEFAULT_STALE_AFTER_MINUTES = 180;
 
 const metricsQuerySchema = {
   type: "object",
@@ -102,11 +109,42 @@ function parseMetricsQuery(
 export function createApiV1Routes(
   repository: AirQualityRepository,
   now: () => Date = () => new Date(),
+  options: ApiV1Options = {},
 ): FastifyPluginAsync {
+  const staleAfterMinutes =
+    options.staleAfterMinutes ?? DEFAULT_STALE_AFTER_MINUTES;
+
   return async (app) => {
     app.get("/stations", async () => ({
       data: await repository.listStations(),
     }));
+
+    app.get("/freshness", async () => {
+      const freshness = await repository.getFreshness();
+      const currentTime = now();
+      const ageMinutes =
+        freshness.lastIngestedAt === null
+          ? null
+          : Math.max(
+              0,
+              Math.floor(
+                (currentTime.getTime() - freshness.lastIngestedAt.getTime()) /
+                  60_000,
+              ),
+            );
+
+      return {
+        data: {
+          latestObservation:
+            freshness.latestObservation?.toISOString() ?? null,
+          lastIngestedAt: freshness.lastIngestedAt?.toISOString() ?? null,
+          lastAttemptAt: freshness.lastAttemptAt?.toISOString() ?? null,
+          ageMinutes,
+          staleAfterMinutes,
+          isStale: ageMinutes === null || ageMinutes > staleAfterMinutes,
+        },
+      };
+    });
 
     app.get<{ Querystring: MetricsQuerystring }>(
       "/metrics",
@@ -124,20 +162,25 @@ export function createApiV1Routes(
 
         const readings = await repository.listMetrics(query);
         return {
-          data: readings.map((reading) => ({
-            stationId: reading.id,
-            name: reading.name,
-            country: reading.country,
-            latitude: reading.latitude,
-            longitude: reading.longitude,
-            observedAt: reading.observedAt,
-            metrics: {
+          data: readings.map((reading) => {
+            const metrics = {
               pm2_5: reading.pm2_5,
               pm10: reading.pm10,
               nitrogen_dioxide: reading.nitrogen_dioxide,
               ozone: reading.ozone,
-            },
-          })),
+            };
+
+            return {
+              stationId: reading.id,
+              name: reading.name,
+              country: reading.country,
+              latitude: reading.latitude,
+              longitude: reading.longitude,
+              observedAt: reading.observedAt,
+              metrics,
+              aqi: computeAqi(metrics),
+            };
+          }),
           meta: {
             from: query.from.toISOString(),
             to: query.to.toISOString(),

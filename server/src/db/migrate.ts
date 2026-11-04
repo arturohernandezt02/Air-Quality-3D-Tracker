@@ -1,17 +1,21 @@
 import "dotenv/config";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { sql } from "kysely";
 import { createDatabase } from "./database.js";
 
-const migrationUrl = new URL(
-  "./migrations/001_create_air_quality_schema.sql",
-  import.meta.url,
-);
-const migration = await readFile(migrationUrl, "utf8");
+const migrationsUrl = new URL("./migrations/", import.meta.url);
+const migrationFiles = (await readdir(migrationsUrl))
+  .filter((file) => file.endsWith(".sql"))
+  .sort();
 const database = createDatabase();
 
 try {
-  await sql.raw(migration).execute(database);
+  for (const file of migrationFiles) {
+    const migration = await readFile(new URL(file, migrationsUrl), "utf8");
+    await sql.raw(migration).execute(database);
+    console.info(`Applied migration ${file}.`);
+  }
+
   console.info("TimescaleDB schema migration completed.");
 } finally {
   await database.destroy();

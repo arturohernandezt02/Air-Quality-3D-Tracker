@@ -3,6 +3,7 @@ import test from "node:test";
 import { createApp } from "../app.js";
 import type {
   AirQualityRepository,
+  FreshnessRecord,
   MetricRecord,
   MetricsQuery,
   StationRecord,
@@ -24,9 +25,15 @@ const reading: MetricRecord = {
   nitrogen_dioxide: 4.5,
   ozone: 32.7,
 };
+const freshness: FreshnessRecord = {
+  latestObservation: new Date("2026-11-02T17:00:00.000Z"),
+  lastIngestedAt: new Date("2026-11-02T17:30:00.000Z"),
+  lastAttemptAt: new Date("2026-11-02T17:30:00.000Z"),
+};
 
 function createRepository(
   metrics: MetricRecord[] = [reading],
+  freshnessRecord: FreshnessRecord = freshness,
 ): AirQualityRepository & { lastQuery?: MetricsQuery } {
   const repository: AirQualityRepository & { lastQuery?: MetricsQuery } = {
     async listStations() {
@@ -36,12 +43,21 @@ function createRepository(
       repository.lastQuery = query;
       return metrics;
     },
+    async getFreshness() {
+      return freshnessRecord;
+    },
   };
   return repository;
 }
 
-function createTestApp(repository: AirQualityRepository) {
-  const app = createApp(repository, () => now);
+function createTestApp(
+  repository: AirQualityRepository,
+  options: {
+    checkReadiness?: () => Promise<void>;
+    staleAfterMinutes?: number;
+  } = {},
+) {
+  const app = createApp(repository, () => now, options);
   app.log.level = "silent";
   return app;
 }
@@ -73,6 +89,120 @@ test("GET /health continues to report server status", async () => {
     assert.deepEqual(response.json(), { status: "ok" });
   } finally {
     await app.close();
+  }
+});
+
+test("GET /ready reports readiness when the database responds", async () => {
+  const app = createTestApp(createRepository(), {
+    checkReadiness: async () => {},
+  });
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/ready",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { status: "ready" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /ready returns 503 when the database is unavailable", async () => {
+  const app = createTestApp(createRepository(), {
+    checkReadiness: async () => {
+      throw new Error("database unavailable");
+    },
+  });
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/ready",
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.json(), {
+      error: {
+        code: "NOT_READY",
+        message: "Database is not available.",
+      },
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/v1/freshness reports the latest ingestion and observation", async () => {
+  const app = createTestApp(createRepository());
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/v1/freshness",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), {
+      data: {
+        latestObservation: "2026-11-02T17:00:00.000Z",
+        lastIngestedAt: "2026-11-02T17:30:00.000Z",
+        lastAttemptAt: "2026-11-02T17:30:00.000Z",
+        ageMinutes: 30,
+        staleAfterMinutes: 180,
+        isStale: false,
+      },
+    });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /api/v1/freshness marks old or missing ingestions as stale", async () => {
+  const oldRepository = createRepository([reading], {
+    latestObservation: new Date("2026-11-02T13:00:00.000Z"),
+    lastIngestedAt: new Date("2026-11-02T13:00:00.000Z"),
+    lastAttemptAt: new Date("2026-11-02T13:00:00.000Z"),
+  });
+  const emptyRepository = createRepository([], {
+    latestObservation: null,
+    lastIngestedAt: null,
+    lastAttemptAt: null,
+  });
+  const oldApp = createTestApp(oldRepository, { staleAfterMinutes: 120 });
+  const emptyApp = createTestApp(emptyRepository);
+  try {
+    const oldResponse = await oldApp.inject({
+      method: "GET",
+      url: "/api/v1/freshness",
+    });
+    const emptyResponse = await emptyApp.inject({
+      method: "GET",
+      url: "/api/v1/freshness",
+    });
+
+    assert.deepEqual(oldResponse.json(), {
+      data: {
+        latestObservation: "2026-11-02T13:00:00.000Z",
+        lastIngestedAt: "2026-11-02T13:00:00.000Z",
+        lastAttemptAt: "2026-11-02T13:00:00.000Z",
+        ageMinutes: 300,
+        staleAfterMinutes: 120,
+        isStale: true,
+      },
+    });
+    assert.deepEqual(emptyResponse.json(), {
+      data: {
+        latestObservation: null,
+        lastIngestedAt: null,
+        lastAttemptAt: null,
+        ageMinutes: null,
+        staleAfterMinutes: 180,
+        isStale: true,
+      },
+    });
+  } finally {
+    await oldApp.close();
+    await emptyApp.close();
   }
 });
 
@@ -122,6 +252,17 @@ test("GET /api/v1/metrics returns map coordinates and hourly pollutant values", 
             pm10: 21.1,
             nitrogen_dioxide: 4.5,
             ozone: 32.7,
+          },
+          aqi: {
+            value: 35,
+            category: "fair",
+            dominantPollutant: "pm2_5",
+            pollutants: {
+              pm2_5: 35,
+              pm10: 24,
+              nitrogen_dioxide: 9,
+              ozone: 11,
+            },
           },
         },
       ],

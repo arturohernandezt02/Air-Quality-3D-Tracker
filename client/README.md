@@ -19,4 +19,8 @@ El tablero incluye filtros de contaminante, estación y rango de 6, 24 o 48 hora
 
 El mapa base carga el estilo Positron de OpenFreeMap; se necesita conexión a internet para ver los tiles.
 
+## Docker
+
+El `Dockerfile` compila la SPA y la sirve con nginx. Dentro del stack completo (`docker compose up --build` desde la raíz), nginx proxya `/api`, `/health` y `/ready` hacia el servicio `server` y la interfaz queda en `http://localhost:8080`. `VITE_API_BASE_URL` se pasa como argumento de build y por defecto es `/api/v1`.
+
 Consulta el [README del proyecto](../README.md) para levantar TimescaleDB, aplicar la migración y ejecutar la ingesta.
