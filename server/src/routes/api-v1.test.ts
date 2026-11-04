@@ -40,8 +40,11 @@ function createRepository(
   return repository;
 }
 
-function createTestApp(repository: AirQualityRepository) {
-  const app = createApp(repository, () => now);
+function createTestApp(
+  repository: AirQualityRepository,
+  checkReadiness?: () => Promise<void>,
+) {
+  const app = createApp(repository, () => now, checkReadiness);
   app.log.level = "silent";
   return app;
 }
@@ -71,6 +74,43 @@ test("GET /health continues to report server status", async () => {
 
     assert.equal(response.statusCode, 200);
     assert.deepEqual(response.json(), { status: "ok" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /ready reports readiness when the database responds", async () => {
+  const app = createTestApp(createRepository(), async () => {});
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/ready",
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { status: "ready" });
+  } finally {
+    await app.close();
+  }
+});
+
+test("GET /ready returns 503 when the database is unavailable", async () => {
+  const app = createTestApp(createRepository(), async () => {
+    throw new Error("database unavailable");
+  });
+  try {
+    const response = await app.inject({
+      method: "GET",
+      url: "/ready",
+    });
+
+    assert.equal(response.statusCode, 503);
+    assert.deepEqual(response.json(), {
+      error: {
+        code: "NOT_READY",
+        message: "Database is not available.",
+      },
+    });
   } finally {
     await app.close();
   }

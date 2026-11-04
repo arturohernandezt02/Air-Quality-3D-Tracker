@@ -33,7 +33,8 @@ The API source and supported variables are documented at [Open-Meteo Air Quality
 
 Start the server from `server/` with `npm run dev`. The default base URL is `http://localhost:3000`.
 
-- `GET /health` checks that the HTTP server is running.
+- `GET /health` is a liveness check: it only confirms that the HTTP server is running.
+- `GET /ready` is a readiness check: it runs `SELECT 1` against the database. It returns `{ "status": "ready" }` on success and HTTP 503 with a `NOT_READY` error when the database is unreachable.
 - `GET /api/v1/stations` returns configured stations with their coordinates.
 - `GET /api/v1/metrics` returns one record per station and hourly timestamp, including coordinates and PM2.5, PM10, NO2, and O3 values. The default time range is the previous 24 hours.
 
@@ -52,3 +53,5 @@ GET /api/v1/metrics?from=2026-11-01T00:00:00Z&to=2026-11-02T00:00:00Z&stationId=
 ```
 
 Successful responses have a `data` array and `meta` with the effective time interval and record count. Invalid query parameters return HTTP 400; unexpected server or database errors return HTTP 500.
+
+The server waits up to 5 seconds to acquire a database connection and closes the pool gracefully on `SIGINT`/`SIGTERM`.

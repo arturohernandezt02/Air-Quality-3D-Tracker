@@ -86,11 +86,12 @@ Variables relevantes:
 
 ### Server
 
-Flujo de arranque: `src/index.ts` carga `.env`, crea la instancia de Kysely (`db/database.ts`), la envuelve en `KyselyAirQualityRepository` y llama a `createApp()` (`app.ts`). El cierre de Fastify destruye el pool de la base de datos.
+Flujo de arranque: `src/index.ts` carga `.env`, crea la instancia de Kysely (`db/database.ts`), la envuelve en `KyselyAirQualityRepository` y llama a `createApp()` (`app.ts`) pasando `checkDatabaseConnection` como comprobación de readiness. El cierre de Fastify destruye el pool de la base de datos, y `SIGINT`/`SIGTERM` disparan un apagado ordenado (una sola vez) que cierra la app y sale con código 0 o 1.
 
-- `src/app.ts`: `createApp(repository, now)` recibe el repositorio y el reloj por inyección de dependencias para facilitar los tests. Configura CORS con `FRONTEND_ORIGIN`, `GET /health`, el prefijo `/api/v1` y un manejador de errores que convierte fallos de validación en `400 INVALID_QUERY` y el resto en un `500` genérico sin filtrar detalles internos.
+- `src/app.ts`: `createApp(repository, now, checkReadiness)` recibe el repositorio, el reloj y la comprobación de readiness por inyección de dependencias para facilitar los tests. Configura CORS con `FRONTEND_ORIGIN`, `GET /health` (liveness), `GET /ready` (readiness con `SELECT 1`; `503 NOT_READY` si la base de datos falla), el prefijo `/api/v1` y un manejador de errores que convierte fallos de validación en `400 INVALID_QUERY` y el resto en un `500` genérico sin filtrar detalles internos.
 - `src/routes/api-v1.ts`: define `GET /stations` y `GET /metrics`. `from`/`to` deben ser RFC 3339 con zona horaria y enviarse juntos; por defecto se consultan las últimas 24 h. El intervalo es `[from, to)`. La respuesta es `{ data, meta }`, y los errores `{ error: { code, message } }`.
 - `src/db/repository.ts`: interfaz `AirQualityRepository` (`listStations`, `listMetrics`) e implementación con Kysely. Mantén las rutas dependiendo de la interfaz, no de Kysely directamente.
+- `src/db/database.ts`: crea el pool de `pg` con `connectionTimeoutMillis: 5_000` y exporta `checkDatabaseConnection`, que ejecuta `SELECT 1` para el endpoint `/ready`.
 - `src/db/types.ts`: tipos de las tablas para Kysely.
 - `src/db/migrate.ts` + `src/db/migrations/001_create_air_quality_schema.sql`: migración idempotente en SQL crudo; crea `stations`, `air_quality_readings` como hypertable de TimescaleDB e índice por estación/tiempo. Para cambios de esquema, añade una migración nueva en lugar de reescribir la existente.
 - `src/services/open-meteo.ts`: construye la petición a Open-Meteo (UTC, unixtime, 72 h: dos días anteriores y el día actual) mediante `buildAirQualityUrl`, valida estrictamente el JSON y lo convierte a `HourlyObservation[]`. Las 72 h garantizan que la ventana de 48 h del cliente esté cubierta desde la primera ingesta.

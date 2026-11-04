@@ -1,4 +1,4 @@
-import { Kysely, PostgresDialect } from "kysely";
+import { Kysely, PostgresDialect, sql } from "kysely";
 import { Pool } from "pg";
 import type { AirQualityDatabase } from "./types.js";
 
@@ -39,7 +39,16 @@ export function createDatabase(): Kysely<AirQualityDatabase> {
 
   return new Kysely<AirQualityDatabase>({
     dialect: new PostgresDialect({
-      pool: new Pool({ connectionString }),
+      pool: new Pool({
+        connectionString,
+        connectionTimeoutMillis: 5_000,
+      }),
     }),
   });
+}
+
+export async function checkDatabaseConnection(
+  database: Kysely<AirQualityDatabase>,
+): Promise<void> {
+  await sql`SELECT 1`.execute(database);
 }
