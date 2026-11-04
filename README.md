@@ -6,13 +6,13 @@ Open-Meteo entrega estimaciones basadas en modelos, no mediciones directas de es
 
 ## Arquitectura actual
 
-- `server/`: API REST Fastify, acceso PostgreSQL con Kysely, ingesta bajo demanda desde Open-Meteo y esquema TimescaleDB.
+- `server/`: API REST Fastify, acceso PostgreSQL con Kysely, ingesta automática desde Open-Meteo y esquema TimescaleDB.
 - `client/`: aplicación React + Vite con estilos Tailwind, mapa base MapLibre y capas Hexagon/Heatmap de Deck.gl.
 - `docker-compose.yml`: instancia local de TimescaleDB.
 
 La capa Hexagon agrega las lecturas temporales de cada estación. Con las tres ubicaciones iniciales no hay cobertura espacial densa y las visualizaciones no interpolan valores entre estaciones.
 
-La ingesta descarga 72 horas de datos (dos días anteriores y el día actual) para que el filtro de 48 horas esté cubierto desde la primera ejecución.
+La ingesta descarga 72 horas de datos (dos días anteriores y el día actual) para que el filtro de 48 horas esté cubierto desde la primera ejecución. El servidor la ejecuta al arrancar y después cada 60 minutos por defecto (`INGEST_INTERVAL_MINUTES`). La interfaz muestra la antigüedad de la última ingesta y avisa cuando supera el umbral de frescura.
 
 ## Ejecutar localmente
 
@@ -25,13 +25,12 @@ Requisitos: Node.js 20 o posterior y Docker Desktop en ejecución.
    docker compose --env-file server\.env up -d timescaledb
    ```
 
-2. Inicializa el esquema, descarga datos y arranca la API:
+2. Inicializa el esquema y arranca la API. La primera ingesta se ejecuta automáticamente al arrancar:
 
    ```powershell
    Push-Location server
    npm install
    npm run db:migrate
-   npm run ingest
    npm run dev
    ```
 
@@ -44,7 +43,7 @@ Requisitos: Node.js 20 o posterior y Docker Desktop en ejecución.
    npm run dev
    ```
 
-Abre la URL que muestra Vite (por defecto `http://localhost:5173`). El proxy de desarrollo envía `/api` al servidor en `http://localhost:3000`. Si cambias el origen de la interfaz, ajusta `FRONTEND_ORIGIN` en `server/.env`. Para actualizar las lecturas guardadas, ejecuta `npm run ingest` desde `server/`.
+Abre la URL que muestra Vite (por defecto `http://localhost:5173`). El proxy de desarrollo envía `/api` al servidor en `http://localhost:3000`. Si cambias el origen de la interfaz, ajusta `FRONTEND_ORIGIN` en `server/.env`. La ingesta se repite automáticamente cada 60 minutos; puedes ajustarla con `INGEST_INTERVAL_MINUTES` o desactivarla con `0`. `npm run ingest` sigue disponible para una ejecución manual.
 
 ## Interfaz
 
@@ -52,6 +51,7 @@ Abre la URL que muestra Vite (por defecto `http://localhost:5173`). El proxy de 
 - Filtra todas las estaciones o una ubicación y selecciona una ventana de 6, 24 o 48 horas.
 - Alterna entre HexagonLayer 3D y HeatmapLayer.
 - El mapa encuadra las estaciones con datos y ofrece un botón para recentrar; las métricas y la leyenda se actualizan con los filtros. Si el mapa base no carga, muestra un aviso con reintento.
+- El encabezado y el panel de resumen muestran la antigüedad de la última ingesta. Si los datos superan el umbral de frescura, aparece una advertencia y el estado cambia a «Datos desactualizados».
 
 Los mapas base usan el estilo Positron de OpenFreeMap y los datos de Open-Meteo. Para ejecución local se requiere acceso a internet para cargar ambos.
 

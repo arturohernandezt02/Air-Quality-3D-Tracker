@@ -1,15 +1,28 @@
 import "dotenv/config";
 import { createApp } from "./app.js";
+import { loadIngestionConfig } from "./config/ingestion.js";
+import { loadLocations } from "./config/locations.js";
 import { checkDatabaseConnection, createDatabase } from "./db/database.js";
 import { KyselyAirQualityRepository } from "./db/repository.js";
+import {
+  startIngestionScheduler,
+  type IngestionScheduler,
+} from "./services/ingestion-scheduler.js";
 
 const database = createDatabase();
+const locations = loadLocations();
+const ingestionConfig = loadIngestionConfig();
 const app = createApp(
   new KyselyAirQualityRepository(database),
   undefined,
-  () => checkDatabaseConnection(database),
+  {
+    checkReadiness: () => checkDatabaseConnection(database),
+    staleAfterMinutes: ingestionConfig.staleAfterMinutes,
+  },
 );
+let scheduler: IngestionScheduler | undefined;
 app.addHook("onClose", async () => {
+  await scheduler?.stop();
   await database.destroy();
 });
 
@@ -48,3 +61,10 @@ try {
   await app.close();
   throw error;
 }
+
+scheduler = startIngestionScheduler({
+  database,
+  locations,
+  config: ingestionConfig,
+  logger: app.log,
+});

@@ -5,13 +5,19 @@ import { createApiV1Routes } from "./routes/api-v1.js";
 
 export type ReadinessCheck = () => Promise<void>;
 
+export interface AppOptions {
+  checkReadiness?: ReadinessCheck;
+  staleAfterMinutes?: number;
+}
+
 const defaultReadinessCheck: ReadinessCheck = async () => {};
 
 export function createApp(
   repository: AirQualityRepository,
   now: () => Date = () => new Date(),
-  checkReadiness: ReadinessCheck = defaultReadinessCheck,
+  options: AppOptions = {},
 ) {
+  const checkReadiness = options.checkReadiness ?? defaultReadinessCheck;
   const app = Fastify({
     logger: true,
     ajv: { customOptions: { removeAdditional: false } },
@@ -37,7 +43,9 @@ export function createApp(
       });
     }
   });
-  app.register(createApiV1Routes(repository, now), { prefix: "/api/v1" });
+  app.register(createApiV1Routes(repository, now, {
+    staleAfterMinutes: options.staleAfterMinutes,
+  }), { prefix: "/api/v1" });
 
   app.setErrorHandler((error, request, reply) => {
     if (

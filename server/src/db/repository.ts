@@ -1,4 +1,5 @@
 import type { Kysely } from "kysely";
+import { sql } from "kysely";
 import type { AirQualityDatabase } from "./types.js";
 
 export interface StationRecord {
@@ -23,9 +24,16 @@ export interface MetricRecord extends StationRecord {
   ozone: number | null;
 }
 
+export interface FreshnessRecord {
+  latestObservation: Date | null;
+  lastIngestedAt: Date | null;
+  lastAttemptAt: Date | null;
+}
+
 export interface AirQualityRepository {
   listStations(): Promise<StationRecord[]>;
   listMetrics(query: MetricsQuery): Promise<MetricRecord[]>;
+  getFreshness(): Promise<FreshnessRecord>;
 }
 
 export class KyselyAirQualityRepository implements AirQualityRepository {
@@ -66,5 +74,30 @@ export class KyselyAirQualityRepository implements AirQualityRepository {
       .orderBy("reading.observed_at", "asc")
       .orderBy("station.id", "asc")
       .execute();
+  }
+
+  async getFreshness(): Promise<FreshnessRecord> {
+    const readings = await sql<{
+      latestObservation: Date | null;
+      lastIngestedAt: Date | null;
+    }>`
+      SELECT
+        MAX(observed_at) AS "latestObservation",
+        MAX(ingested_at) AS "lastIngestedAt"
+      FROM air_quality_readings
+    `.execute(this.database);
+    const status = await this.database
+      .selectFrom("ingestion_status")
+      .select(["last_attempt_at", "last_success_at"])
+      .where("id", "=", 1)
+      .executeTakeFirst();
+    const readingTotals = readings.rows[0];
+
+    return {
+      latestObservation: readingTotals?.latestObservation ?? null,
+      lastIngestedAt:
+        status?.last_success_at ?? readingTotals?.lastIngestedAt ?? null,
+      lastAttemptAt: status?.last_attempt_at ?? null,
+    };
   }
 }

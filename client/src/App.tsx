@@ -55,13 +55,44 @@ function formatValue(value: number | null, digits = 1) {
   return value === null ? "—" : value.toFixed(digits);
 }
 
+function formatAge(ageMinutes: number | null) {
+  if (ageMinutes === null) {
+    return "sin registro";
+  }
+
+  if (ageMinutes < 1) {
+    return "hace menos de 1 min";
+  }
+
+  if (ageMinutes < 60) {
+    return `hace ${ageMinutes} min`;
+  }
+
+  const hours = Math.floor(ageMinutes / 60);
+  if (hours < 24) {
+    return `hace ${hours} h`;
+  }
+
+  return `hace ${Math.floor(hours / 24)} d`;
+}
+
+function formatThreshold(minutes: number) {
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours} h` : `${Math.round(hours / 24)} d`;
+}
+
 function App() {
   const [rangeHours, setRangeHours] = useState(24);
   const [metric, setMetric] = useState<MetricKey>("pm2_5");
   const [stationId, setStationId] = useState("all");
   const [layerMode, setLayerMode] = useState<MapLayerMode>("hexagon");
-  const { stations, readings, isLoading, error, updatedAt, refresh } =
+  const { stations, readings, freshness, isLoading, error, updatedAt, refresh } =
     useAirQualityData(rangeHours, stationId);
+  const dataIsStale = freshness?.isStale === true;
 
   const activeMetric =
     METRIC_OPTIONS.find((option) => option.key === metric) ?? METRIC_OPTIONS[0];
@@ -113,7 +144,9 @@ function App() {
                 ? "border-rose-200 bg-rose-50 text-rose-700"
                 : isLoading
                   ? "border-amber-200 bg-amber-50 text-amber-700"
-                  : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : dataIsStale
+                    ? "border-amber-200 bg-amber-50 text-amber-700"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700"
             }`}
             aria-live="polite"
           >
@@ -123,22 +156,41 @@ function App() {
                   ? "bg-rose-500"
                   : isLoading
                     ? "bg-amber-500"
-                    : "bg-emerald-500"
+                    : dataIsStale
+                      ? "bg-amber-500"
+                      : "bg-emerald-500"
               }`}
             />
             {isLoading
               ? "Conectando API"
               : error
                 ? "API desconectada"
-                : "API conectada"}
+                : dataIsStale
+                  ? "Datos desactualizados"
+                  : "API conectada"}
           </div>
-          {updatedAt && (
-            <span className="hidden text-xs text-slate-400 lg:inline">
-              Actualizado {updatedAt.toLocaleTimeString("es-MX", {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+          {freshness ? (
+            <span
+              className={`hidden text-xs lg:inline ${
+                dataIsStale
+                  ? "font-medium text-amber-600"
+                  : "text-slate-400"
+              }`}
+            >
+              {freshness.lastIngestedAt === null
+                ? "Sin ingesta registrada"
+                : `Última ingesta ${formatAge(freshness.ageMinutes)}`}
             </span>
+          ) : (
+            updatedAt && (
+              <span className="hidden text-xs text-slate-400 lg:inline">
+                Actualizado{" "}
+                {updatedAt.toLocaleTimeString("es-MX", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </span>
+            )
           )}
           <button
             type="button"
@@ -362,7 +414,47 @@ function App() {
                   : "—"}
               </span>
             </div>
+            <div className="mt-2 flex items-center justify-between text-xs">
+              <span className="text-slate-500">Última ingesta</span>
+              <span
+                className={
+                  dataIsStale
+                    ? "font-medium text-amber-600"
+                    : "font-medium text-slate-700"
+                }
+              >
+                {freshness === null
+                  ? "—"
+                  : freshness.lastIngestedAt === null
+                    ? "Sin registro"
+                    : formatAge(freshness.ageMinutes)}
+              </span>
+            </div>
           </section>
+
+          {freshness?.isStale && !error && (
+            <div
+              role="status"
+              className="rounded-xl border border-amber-200 bg-amber-50 p-3.5"
+            >
+              <div className="flex gap-2.5">
+                <AlertCircle
+                  size={17}
+                  className="mt-0.5 shrink-0 text-amber-600"
+                />
+                <div>
+                  <p className="text-xs font-semibold text-amber-800">
+                    Datos desactualizados
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-amber-700">
+                    {freshness.lastIngestedAt === null
+                      ? "Todavía no hay una ingesta registrada. Comprueba que la ingesta automática esté activa."
+                      : `La última ingesta fue ${formatAge(freshness.ageMinutes)}, superando el umbral de ${formatThreshold(freshness.staleAfterMinutes)}.`}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div

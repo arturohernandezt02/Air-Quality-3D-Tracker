@@ -10,6 +10,12 @@ interface MetricsQuerystring {
   stationId?: string;
 }
 
+export interface ApiV1Options {
+  staleAfterMinutes?: number;
+}
+
+const DEFAULT_STALE_AFTER_MINUTES = 180;
+
 const metricsQuerySchema = {
   type: "object",
   additionalProperties: false,
@@ -102,11 +108,42 @@ function parseMetricsQuery(
 export function createApiV1Routes(
   repository: AirQualityRepository,
   now: () => Date = () => new Date(),
+  options: ApiV1Options = {},
 ): FastifyPluginAsync {
+  const staleAfterMinutes =
+    options.staleAfterMinutes ?? DEFAULT_STALE_AFTER_MINUTES;
+
   return async (app) => {
     app.get("/stations", async () => ({
       data: await repository.listStations(),
     }));
+
+    app.get("/freshness", async () => {
+      const freshness = await repository.getFreshness();
+      const currentTime = now();
+      const ageMinutes =
+        freshness.lastIngestedAt === null
+          ? null
+          : Math.max(
+              0,
+              Math.floor(
+                (currentTime.getTime() - freshness.lastIngestedAt.getTime()) /
+                  60_000,
+              ),
+            );
+
+      return {
+        data: {
+          latestObservation:
+            freshness.latestObservation?.toISOString() ?? null,
+          lastIngestedAt: freshness.lastIngestedAt?.toISOString() ?? null,
+          lastAttemptAt: freshness.lastAttemptAt?.toISOString() ?? null,
+          ageMinutes,
+          staleAfterMinutes,
+          isStale: ageMinutes === null || ageMinutes > staleAfterMinutes,
+        },
+      };
+    });
 
     app.get<{ Querystring: MetricsQuerystring }>(
       "/metrics",

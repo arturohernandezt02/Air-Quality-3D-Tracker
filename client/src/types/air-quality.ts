@@ -18,6 +18,15 @@ export interface AirQualityReading {
   metrics: Record<MetricKey, number | null>;
 }
 
+export interface AirQualityFreshness {
+  latestObservation: string | null;
+  lastIngestedAt: string | null;
+  lastAttemptAt: string | null;
+  ageMinutes: number | null;
+  staleAfterMinutes: number;
+  isStale: boolean;
+}
+
 export interface ApiData<T> {
   data: T;
 }

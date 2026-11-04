@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type {
+  AirQualityFreshness,
   AirQualityReading,
   AirQualityStation,
 } from "../types/air-quality";
@@ -7,11 +8,13 @@ import type {
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ?? "/api/v1"
 ).replace(/\/+$/, "");
+const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 interface AirQualityDataState {
   requestKey: string;
   stations: AirQualityStation[];
   readings: AirQualityReading[];
+  freshness: AirQualityFreshness | null;
   error: string | null;
   updatedAt: Date | null;
 }
@@ -105,6 +108,61 @@ function parseDataArray<T>(
   return payload.data.map(parseItem);
 }
 
+function parseNullableTimestamp(
+  value: unknown,
+  field: string,
+): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new Error(
+      `La API devolvió el campo de frescura "${field}" con formato inválido.`,
+    );
+  }
+
+  return value;
+}
+
+function parseFreshness(payload: unknown): AirQualityFreshness {
+  if (!isRecord(payload) || !isRecord(payload.data)) {
+    throw new Error("La API devolvió una respuesta de frescura inválida.");
+  }
+
+  const data = payload.data;
+  const ageMinutes = data.ageMinutes;
+  const staleAfterMinutes = data.staleAfterMinutes;
+  const isStale = data.isStale;
+  if (
+    (ageMinutes !== null &&
+      (typeof ageMinutes !== "number" ||
+        !Number.isFinite(ageMinutes) ||
+        ageMinutes < 0)) ||
+    typeof staleAfterMinutes !== "number" ||
+    !Number.isFinite(staleAfterMinutes) ||
+    staleAfterMinutes < 1 ||
+    typeof isStale !== "boolean"
+  ) {
+    throw new Error("La API devolvió una respuesta de frescura inválida.");
+  }
+
+  return {
+    latestObservation: parseNullableTimestamp(
+      data.latestObservation,
+      "latestObservation",
+    ),
+    lastIngestedAt: parseNullableTimestamp(
+      data.lastIngestedAt,
+      "lastIngestedAt",
+    ),
+    lastAttemptAt: parseNullableTimestamp(data.lastAttemptAt, "lastAttemptAt"),
+    ageMinutes,
+    staleAfterMinutes,
+    isStale,
+  };
+}
+
 async function fetchApi(url: string, signal: AbortSignal): Promise<unknown> {
   const response = await fetch(url, { signal });
   const body = await response.text();
@@ -150,6 +208,7 @@ export function useAirQualityData(
     requestKey: "",
     stations: [],
     readings: [],
+    freshness: null,
     error: null,
     updatedAt: null,
   });
@@ -173,12 +232,14 @@ export function useAirQualityData(
         `${API_BASE_URL}/metrics?${query.toString()}`,
         controller.signal,
       ),
+      fetchApi(`${API_BASE_URL}/freshness`, controller.signal),
     ])
-      .then(([stationsResponse, metricsResponse]) => {
+      .then(([stationsResponse, metricsResponse, freshnessResponse]) => {
         setState({
           requestKey,
           stations: parseDataArray(stationsResponse, parseStation),
           readings: parseDataArray(metricsResponse, parseReading),
+          freshness: parseFreshness(freshnessResponse),
           error: null,
           updatedAt: new Date(),
         });
@@ -203,6 +264,14 @@ export function useAirQualityData(
 
   const refresh = useCallback(() => {
     setRefreshVersion((version) => version + 1);
+  }, []);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setRefreshVersion((version) => version + 1);
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(intervalId);
   }, []);
 
   const { requestKey: completedRequestKey, ...data } = state;

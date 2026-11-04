@@ -20,7 +20,25 @@ export interface AirQualityReadingsTable {
   ingested_at: Generated<Date>;
 }
 
+export interface IngestionStatusTable {
+  id: number;
+  last_attempt_at: ColumnType<
+    Date | null,
+    Date | string | null,
+    Date | string | null
+  >;
+  last_success_at: ColumnType<
+    Date | null,
+    Date | string | null,
+    Date | string | null
+  >;
+  last_error: string | null;
+  locations_count: number;
+  readings_count: number;
+}
+
 export interface AirQualityDatabase {
   stations: StationsTable;
   air_quality_readings: AirQualityReadingsTable;
+  ingestion_status: IngestionStatusTable;
 }
