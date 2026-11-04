@@ -8,7 +8,7 @@ Open-Meteo entrega estimaciones basadas en modelos, no mediciones directas de es
 
 - `server/`: API REST Fastify, acceso PostgreSQL con Kysely, ingesta automática desde Open-Meteo y esquema TimescaleDB.
 - `client/`: aplicación React + Vite con estilos Tailwind, mapa base MapLibre y capas Hexagon/Heatmap de Deck.gl.
-- `docker-compose.yml`: instancia local de TimescaleDB.
+- `docker-compose.yml`: stack completo con TimescaleDB, migración, API y cliente servido por nginx. Cada paquete incluye su `Dockerfile`.
 
 La capa Hexagon agrega las lecturas temporales de cada estación. Con las tres ubicaciones iniciales no hay cobertura espacial densa y las visualizaciones no interpolan valores entre estaciones.
 
@@ -45,6 +45,25 @@ Requisitos: Node.js 20 o posterior y Docker Desktop en ejecución.
 
 Abre la URL que muestra Vite (por defecto `http://localhost:5173`). El proxy de desarrollo envía `/api` al servidor en `http://localhost:3000`. Si cambias el origen de la interfaz, ajusta `FRONTEND_ORIGIN` en `server/.env`. La ingesta se repite automáticamente cada 60 minutos; puedes ajustarla con `INGEST_INTERVAL_MINUTES` o desactivarla con `0`. `npm run ingest` sigue disponible para una ejecución manual.
 
+## Ejecutar con Docker
+
+El `docker-compose.yml` levanta el stack completo: TimescaleDB, un servicio de migración, la API y el cliente servido por nginx.
+
+```powershell
+docker compose up --build
+```
+
+- Interfaz: `http://localhost:8080`
+- API: `http://localhost:3000`; nginx también proxya `/api`, `/health` y `/ready` desde el puerto 8080.
+
+El servicio `migrate` aplica las migraciones antes de arrancar la API y el servidor ejecuta la primera ingesta al iniciar. Si existe `server/.env`, Compose lo lee para `AIR_QUALITY_LOCATIONS` y el resto de ajustes del servidor. Para aplicar también sus credenciales y puertos, pásalo como archivo de entorno:
+
+```powershell
+docker compose --env-file server/.env up --build
+```
+
+Puedes cambiar los puertos publicados con `CLIENT_PORT`, `SERVER_PORT` y `POSTGRES_PORT`. `docker compose down` detiene el stack; añade `-v` para borrar también los datos.
+
 ## Interfaz
 
 - Elige PM2.5, PM10, NO₂, O₃ o el índice AQI europeo.
@@ -71,3 +90,5 @@ npm run build
 npm run lint
 Pop-Location
 ```
+
+El workflow de GitHub Actions (`.github/workflows/ci.yml`) ejecuta estos mismos pasos en cada push a `main` y en cada pull request, además de construir las dos imágenes Docker y validar `docker-compose.yml`.

@@ -30,6 +30,10 @@ Open-Meteo supplies model-based estimates and forecasts, not direct readings fro
 
 Set `DATABASE_URL` only when connecting to a non-default host or using a URL different from the `POSTGRES_*` settings.
 
+### Docker
+
+From the repository root, `docker compose up --build` builds this image and runs it with the rest of the stack. A one-shot `migrate` service applies the SQL files before the API starts; the server does not run migrations on boot. `npm run build` copies the migrations into `dist/db/migrations`, so the production image can run `node dist/db/migrate.js` without `tsx`.
+
 `stations` stores each configured location. `air_quality_readings` is a TimescaleDB hypertable partitioned by `observed_at`, with a unique station/timestamp key and nullable pollutant values for missing API data. `ingestion_status` stores the last attempt, last successful run, counts, and the most recent error.
 
 ## Automatic ingestion

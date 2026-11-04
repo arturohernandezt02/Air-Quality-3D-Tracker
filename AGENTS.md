@@ -8,7 +8,7 @@ Monorepo con dos paquetes independientes (no hay workspace raíz ni `package.jso
 
 - `server/`: API REST con Fastify 5, Kysely y PostgreSQL/TimescaleDB. Ingiere datos horarios de la API Air Quality de Open-Meteo.
 - `client/`: SPA con React 19, Vite, Tailwind CSS 4, MapLibre GL y Deck.gl (HexagonLayer 3D y HeatmapLayer).
-- `docker-compose.yml`: TimescaleDB local (`timescale/timescaledb:2.17.2-pg16`).
+- `docker-compose.yml`: stack completo con TimescaleDB, migración, API y cliente nginx. Los Dockerfiles viven en `server/` y `client/`.
 
 Los datos son **estimaciones modeladas** de Open-Meteo para tres ubicaciones por defecto (Ciudad de México, Madrid y Buenos Aires), no mediciones de estaciones físicas. La cobertura es dispersa y no se interpola entre estaciones.
 
@@ -38,6 +38,15 @@ Ejecuta `npm` dentro de cada paquete; no hay instalación en la raíz.
 | `npm run lint` | `oxlint` |
 | `npm run preview` | Servir el build de producción |
 
+### Docker (raíz)
+
+| Comando | Uso |
+| --- | --- |
+| `docker compose up --build` | Stack completo en `http://localhost:8080` (interfaz) y `http://localhost:3000` (API) |
+| `docker compose build` | Construir las imágenes de API y cliente sin arrancarlas |
+| `docker compose down` | Detener el stack (`-v` borra también el volumen de datos) |
+| `docker compose config` | Validar el archivo Compose |
+
 ### Validación antes de terminar un cambio
 
 ```powershell
@@ -52,7 +61,7 @@ npm run lint
 Pop-Location
 ```
 
-No hay CI ni tests end-to-end configurados.
+La CI de GitHub Actions (`.github/workflows/ci.yml`) ejecuta la validación de ambos paquetes en cada push a `main` y en cada pull request, además de construir las imágenes Docker y validar el compose. No hay tests end-to-end.
 
 ## Entorno local
 
@@ -75,6 +84,8 @@ npm run dev
 Pop-Location
 ```
 
+Como alternativa, `docker compose up --build` levanta TimescaleDB, aplica las migraciones y arranca la API y el cliente sin instalar Node localmente.
+
 Variables relevantes:
 
 - `server/.env`: `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `POSTGRES_PORT`, `FRONTEND_ORIGIN` (lista separada por comas), `AIR_QUALITY_LOCATIONS` (JSON), `INGEST_INTERVAL_MINUTES` (por defecto 60; `0` desactiva la ingesta periódica), `INGEST_ON_STARTUP` (por defecto `true`), `INGEST_STALE_AFTER_MINUTES` (umbral de frescura; por defecto `max(180, 2 × intervalo)`), `PORT`, `HOST` y opcionalmente `DATABASE_URL` para sobrescribir la conexión.
@@ -92,7 +103,7 @@ Flujo de arranque: `src/index.ts` carga `.env`, crea la instancia de Kysely (`db
 - `src/db/repository.ts`: interfaz `AirQualityRepository` (`listStations`, `listMetrics`, `getFreshness`) e implementación con Kysely. Mantén las rutas dependiendo de la interfaz, no de Kysely directamente.
 - `src/db/database.ts`: crea el pool de `pg` con `connectionTimeoutMillis: 5_000` y exporta `checkDatabaseConnection`, que ejecuta `SELECT 1` para el endpoint `/ready`.
 - `src/db/types.ts`: tipos de las tablas para Kysely.
-- `src/db/migrate.ts` + `src/db/migrations/*.sql`: `migrate` aplica todos los `.sql` en orden alfabético; son idempotentes. `001` crea `stations`, `air_quality_readings` como hypertable de TimescaleDB e índice por estación/tiempo. `002` crea `ingestion_status` (singleton con último intento, último éxito, error y conteos). Para cambios de esquema, añade una migración nueva en lugar de reescribir una existente.
+- `src/db/migrate.ts` + `src/db/migrations/*.sql`: `migrate` aplica todos los `.sql` en orden alfabético; son idempotentes. `001` crea `stations`, `air_quality_readings` como hypertable de TimescaleDB e índice por estación/tiempo. `002` crea `ingestion_status` (singleton con último intento, último éxito, error y conteos). Para cambios de esquema, añade una migración nueva en lugar de reescribir una existente. `npm run build` copia los `.sql` a `dist/db/migrations` mediante el script `postbuild`, de modo que `node dist/db/migrate.js` funciona sin `tsx`.
 - `src/services/open-meteo.ts`: construye la petición a Open-Meteo (UTC, unixtime, 72 h: dos días anteriores y el día actual) mediante `buildAirQualityUrl`, valida estrictamente el JSON y lo convierte a `HourlyObservation[]`. Las 72 h garantizan que la ventana de 48 h del cliente esté cubierta desde la primera ingesta.
 - `src/services/aqi.ts`: cálculo del índice europeo de calidad del aire (EAQI) con los umbrales horarios revisados por la EEA en 2024. Interpola cada contaminante, redondea los subíndices y usa el mayor como valor consolidado; los valores superiores a 100 quedan en `extremely_poor`. No requiere base de datos y se prueba con `aqi.test.ts`.
 - `src/services/ingestion.ts`: lógica reutilizable de ingesta. Por cada ubicación, upserta la estación y sus lecturas en una transacción y actualiza `ingestion_status` al final; si falla, registra el intento fallido sin borrar el último éxito. Reejecutar la ingesta no duplica filas (clave `station_id, observed_at`).
@@ -114,6 +125,14 @@ Flujo de arranque: `src/index.ts` carga `.env`, crea la instancia de Kysely (`db
 
 `Open-Meteo → scheduler/ingest manual (upsert) → TimescaleDB (readings + ingestion_status) → API Fastify /api/v1 → hook del cliente (polling 5 min) → App/Deck.gl`
 
+### Docker y CI
+
+- `server/Dockerfile`: build multi-stage con Node 22 Alpine. Compila TypeScript, elimina las devDependencies y ejecuta `dist/index.js` como usuario `node`.
+- `server/scripts/copy-migrations.mjs`: se ejecuta en `postbuild` y copia los `.sql` a `dist/db/migrations`.
+- `client/Dockerfile` + `client/nginx.conf`: compila la SPA y la sirve con nginx. En Compose, nginx proxya `/api`, `/health` y `/ready` hacia `server:3000`.
+- `docker-compose.yml`: `migrate` es un servicio de un solo uso que arranca tras el healthcheck de TimescaleDB; `server` espera a que termine y `client` espera a que `server` esté healthy. Los valores por defecto permiten `docker compose up --build` sin `.env`; `server/.env` se carga con un `env_file` opcional.
+- `.github/workflows/ci.yml`: tres jobs (servidor, cliente y Docker) con Node 22; el job de Docker construye ambas imágenes con caché de GitHub Actions y valida el compose.
+
 ## Convenciones de código
 
 - TypeScript estricto en ambos paquetes. El servidor usa ESM con `module: NodeNext`: los imports relativos deben terminar en `.js` (aunque el archivo fuente sea `.ts`). El cliente usa resolución `bundler` y no lleva extensión en los imports.
@@ -129,6 +148,7 @@ Flujo de arranque: `src/index.ts` carga `.env`, crea la instancia de Kysely (`db
 ## Notas y trampas
 
 - `db:migrate`, `ingest` y el planificador fallan si TimescaleDB no está levantado. La ingesta necesita internet y puede tardar hasta 30 s por ubicación. Si falla una ingesta programada, el servidor sigue sirviendo lecturas y registra el error en logs y en `ingestion_status`.
+- El servicio `migrate` de Compose se ejecuta en cada `docker compose up`; las migraciones son idempotentes. El contenedor de la API no migra automáticamente al arrancar.
 - El planificador corre dentro del proceso de la API: solo ingiere mientras el servidor está encendido y no coordina múltiples instancias. Ejecuta una sola instancia con ingesta activa o usa `INGEST_INTERVAL_MINUTES=0` e `INGEST_ON_STARTUP=false` en las demás.
 - Cambiar `AIR_QUALITY_LOCATIONS` no elimina estaciones antiguas de la base de datos; solo reingiere las nuevas. Actualiza el esquema o limpia manualmente si hace falta.
 - En `.env`, `AIR_QUALITY_LOCATIONS` debe ir entre comillas simples por ser JSON.
