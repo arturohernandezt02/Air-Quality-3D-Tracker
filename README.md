@@ -51,7 +51,7 @@ Abre la URL que muestra Vite (por defecto `http://localhost:5173`). El proxy de 
 - Elige PM2.5, PM10, NO₂ u O₃.
 - Filtra todas las estaciones o una ubicación y selecciona una ventana de 6, 24 o 48 horas.
 - Alterna entre HexagonLayer 3D y HeatmapLayer.
-- El mapa encuadra las estaciones con datos; las métricas y leyenda se actualizan con los filtros.
+- El mapa encuadra las estaciones con datos y ofrece un botón para recentrar; las métricas y la leyenda se actualizan con los filtros. Si el mapa base no carga, muestra un aviso con reintento.
 
 Los mapas base usan el estilo Positron de OpenFreeMap y los datos de Open-Meteo. Para ejecución local se requiere acceso a internet para cargar ambos.
 

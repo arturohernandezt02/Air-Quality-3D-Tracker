@@ -103,7 +103,7 @@ Flujo de arranque: `src/index.ts` carga `.env`, crea la instancia de Kysely (`db
 - `src/App.tsx`: estado de filtros (contaminante, estación, ventana de 6/24/48 h y capa), panel de resumen y carga diferida del mapa con `React.lazy`.
 - `src/hooks/useAirQualityData.ts`: consulta `stations` y `metrics` en paralelo con `AbortController`, valida las respuestas en el límite de la API y expone `{ stations, readings, isLoading, error, updatedAt, refresh }`. No usa datos de respaldo.
 - `src/types/air-quality.ts`: contrato de tipos, `MetricKey`, `METRIC_OPTIONS` y unidades (µg/m³).
-- `src/components/AirQualityMap.tsx`: mapa MapLibre + Deck.gl. Ajusta la cámara a las estaciones, dibuja marcadores seleccionables y alterna HexagonLayer/HeatmapLayer. La importación `maplibre-gl/dist/maplibre-gl-worker.mjs?url` junto con `setWorkerUrl` es necesaria para el worker; no la elimines.
+- `src/components/AirQualityMap.tsx`: mapa MapLibre + Deck.gl. Ajusta la cámara a las estaciones solo cuando cambia el conjunto de ubicaciones (no en cada refresco de datos), incluye un botón «Centrar» y muestra un aviso con reintento si el estilo base no carga. Dibuja marcadores seleccionables y alterna HexagonLayer/HeatmapLayer. La importación `maplibre-gl/dist/maplibre-gl-worker.mjs?url` junto con `setWorkerUrl` es necesaria para el worker; no la elimines.
 - `vite.config.ts`: proxy de `/api` y `/health` hacia Fastify; `optimizeDeps.exclude` para `maplibre-gl` es intencional.
 
 ### Flujo de datos
@@ -127,6 +127,6 @@ Flujo de arranque: `src/index.ts` carga `.env`, crea la instancia de Kysely (`db
 - `db:migrate` e `ingest` fallan si TimescaleDB no está levantado. La ingesta necesita internet y puede tardar hasta 30 s por ubicación.
 - Cambiar `AIR_QUALITY_LOCATIONS` no elimina estaciones antiguas de la base de datos; solo reingiere las nuevas. Actualiza el esquema o limpia manualmente si hace falta.
 - En `.env`, `AIR_QUALITY_LOCATIONS` debe ir entre comillas simples por ser JSON.
-- El mapa base (OpenFreeMap Positron) requiere internet; sin conexión el mapa queda vacío aunque la API responda.
+- El mapa base (OpenFreeMap Positron) requiere internet. Si el estilo no carga, el mapa muestra un aviso con opción de reintentar mientras la capa de datos sigue visible.
 - No hay autenticación, programación de ingesta ni datos simulados de respaldo. Si no hay lecturas, la UI muestra el estado vacío a propósito.
 - El servidor no expone secretos: el manejador global devuelve un `500` genérico. No registres el contenido de `.env` ni cadenas de conexión.

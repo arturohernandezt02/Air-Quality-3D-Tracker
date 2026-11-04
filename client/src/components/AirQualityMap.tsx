@@ -3,6 +3,7 @@ import { HexagonLayer, HeatmapLayer } from "@deck.gl/aggregation-layers";
 import type { MapViewState } from "@deck.gl/core";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import { DeckGL } from "@deck.gl/react";
+import { CircleAlert, LocateFixed } from "lucide-react";
 import { setWorkerUrl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { Map as MapGL, type MapRef } from "react-map-gl/maplibre";
@@ -34,6 +35,7 @@ interface StationSummary {
 }
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/positron";
+const MAP_LOAD_TIMEOUT_MS = 8_000;
 const COLOR_RANGE: [number, number, number, number][] = [
   [24, 126, 127, 150],
   [91, 178, 156, 185],
@@ -58,7 +60,9 @@ export function AirQualityMap({
   onStationSelect,
 }: AirQualityMapProps) {
   const mapRef = useRef<MapRef>(null);
+  const fittedLocationKeyRef = useRef<string | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
+  const [mapError, setMapError] = useState(false);
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
 
   const points = useMemo(
@@ -163,13 +167,21 @@ export function AirQualityMap({
     return [dataLayer, markers];
   }, [layerMode, onStationSelect, points, stationSummaries]);
 
-  const locationKey = stationSummaries
-    .map((station) => `${station.stationId}:${station.latitude}:${station.longitude}`)
-    .join("|");
+  const locationKey = useMemo(
+    () =>
+      stationSummaries
+        .map(
+          (station) =>
+            `${station.stationId}:${station.latitude}:${station.longitude}`,
+        )
+        .sort()
+        .join("|"),
+    [stationSummaries],
+  );
 
-  useEffect(() => {
-    if (!mapLoaded || stationSummaries.length === 0 || !mapRef.current) {
-      return;
+  const fitToStations = useCallback(() => {
+    if (stationSummaries.length === 0 || !mapRef.current) {
+      return false;
     }
 
     const longitudes = stationSummaries.map((station) => station.longitude);
@@ -199,29 +211,85 @@ export function AirQualityMap({
       },
     );
 
-    if (
-      camera?.center !== undefined &&
-      camera.zoom !== undefined
-    ) {
-      const [longitude, latitude] = Array.isArray(camera.center)
-        ? camera.center
-        : "lng" in camera.center
-          ? [camera.center.lng, camera.center.lat]
-          : [camera.center.lon, camera.center.lat];
-      const { zoom, bearing, pitch } = camera;
-
-      setViewState((previous) => ({
-        ...previous,
-        longitude,
-        latitude,
-        zoom,
-        bearing: bearing ?? previous.bearing,
-        pitch: pitch ?? previous.pitch,
-      }));
+    if (camera?.center === undefined || camera.zoom === undefined) {
+      return false;
     }
-  }, [locationKey, mapLoaded, stationSummaries]);
 
-  const handleMapLoad = useCallback(() => setMapLoaded(true), []);
+    const [longitude, latitude] = Array.isArray(camera.center)
+      ? camera.center
+      : "lng" in camera.center
+        ? [camera.center.lng, camera.center.lat]
+        : [camera.center.lon, camera.center.lat];
+    const { zoom, bearing, pitch } = camera;
+
+    setViewState((previous) => ({
+      ...previous,
+      longitude,
+      latitude,
+      zoom,
+      bearing: bearing ?? previous.bearing,
+      pitch: pitch ?? previous.pitch,
+    }));
+
+    return true;
+  }, [stationSummaries]);
+
+  useEffect(() => {
+    if (!mapLoaded || locationKey === "") {
+      return;
+    }
+
+    if (fittedLocationKeyRef.current === locationKey) {
+      return;
+    }
+
+    if (fitToStations()) {
+      fittedLocationKeyRef.current = locationKey;
+    }
+  }, [fitToStations, locationKey, mapLoaded]);
+
+  useEffect(() => {
+    if (mapLoaded || mapError) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(
+      () => setMapError(true),
+      MAP_LOAD_TIMEOUT_MS,
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, [mapError, mapLoaded]);
+
+  const handleMapLoad = useCallback(() => {
+    setMapLoaded(true);
+    setMapError(false);
+  }, []);
+
+  const handleMapError = useCallback(() => {
+    if (!mapLoaded) {
+      setMapError(true);
+    }
+  }, [mapLoaded]);
+
+  const handleFitStations = useCallback(() => {
+    if (fitToStations()) {
+      fittedLocationKeyRef.current = locationKey;
+    }
+  }, [fitToStations, locationKey]);
+
+  const handleRetryMap = useCallback(() => {
+    setMapError(false);
+    setMapLoaded(false);
+    fittedLocationKeyRef.current = null;
+    const map = mapRef.current?.getMap();
+
+    if (map === undefined) {
+      return;
+    }
+
+    map.setStyle(MAP_STYLE);
+  }, []);
 
   const getTooltip = useCallback(
     ({ object }: { object?: StationSummary }) => {
@@ -251,10 +319,49 @@ export function AirQualityMap({
           ref={mapRef}
           mapStyle={MAP_STYLE}
           onLoad={handleMapLoad}
+          onStyleData={handleMapLoad}
+          onError={handleMapError}
           attributionControl={{ compact: true }}
           reuseMaps
         />
       </DeckGL>
+      <button
+        type="button"
+        onClick={handleFitStations}
+        disabled={stationSummaries.length === 0}
+        aria-label="Centrar el mapa en las estaciones"
+        className="absolute bottom-16 right-4 z-10 flex items-center gap-1.5 rounded-lg border border-white/80 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur transition hover:border-teal-300 hover:text-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:bottom-20 md:right-6"
+      >
+        <LocateFixed size={14} />
+        Centrar
+      </button>
+      {mapError && (
+        <div
+          role="alert"
+          className="absolute left-1/2 top-20 z-20 flex w-[calc(100%_-_2rem)] max-w-[440px] -translate-x-1/2 items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50/95 px-3.5 py-3 shadow-sm backdrop-blur md:top-24"
+        >
+          <CircleAlert
+            size={16}
+            className="mt-0.5 shrink-0 text-amber-600"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold text-amber-900">
+              Mapa base no disponible
+            </p>
+            <p className="mt-0.5 text-[11px] leading-4 text-amber-800">
+              La capa de datos sigue visible. Revisa tu conexión e inténtalo de
+              nuevo.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={handleRetryMap}
+            className="shrink-0 text-[11px] font-semibold text-amber-900 underline underline-offset-2"
+          >
+            Reintentar
+          </button>
+        </div>
+      )}
       {readings.length === 0 && (
         <div className="map-empty-state">
           <div className="empty-state-icon">AQ</div>
