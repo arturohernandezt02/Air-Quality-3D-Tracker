@@ -12,6 +12,8 @@ Open-Meteo entrega estimaciones basadas en modelos, no mediciones directas de es
 
 La capa Hexagon agrega las lecturas temporales de cada estación. Con las tres ubicaciones iniciales no hay cobertura espacial densa y las visualizaciones no interpolan valores entre estaciones.
 
+La ingesta descarga 72 horas de datos (dos días anteriores y el día actual) para que el filtro de 48 horas esté cubierto desde la primera ejecución.
+
 ## Ejecutar localmente
 
 Requisitos: Node.js 20 o posterior y Docker Desktop en ejecución.
