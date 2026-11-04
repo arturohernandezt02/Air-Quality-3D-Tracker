@@ -253,6 +253,17 @@ test("GET /api/v1/metrics returns map coordinates and hourly pollutant values", 
             nitrogen_dioxide: 4.5,
             ozone: 32.7,
           },
+          aqi: {
+            value: 35,
+            category: "fair",
+            dominantPollutant: "pm2_5",
+            pollutants: {
+              pm2_5: 35,
+              pm10: 24,
+              nitrogen_dioxide: 9,
+              ozone: 11,
+            },
+          },
         },
       ],
       meta: {

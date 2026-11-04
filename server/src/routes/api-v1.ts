@@ -3,6 +3,7 @@ import type {
   AirQualityRepository,
   MetricsQuery,
 } from "../db/repository.js";
+import { computeAqi } from "../services/aqi.js";
 
 interface MetricsQuerystring {
   from?: string;
@@ -161,20 +162,25 @@ export function createApiV1Routes(
 
         const readings = await repository.listMetrics(query);
         return {
-          data: readings.map((reading) => ({
-            stationId: reading.id,
-            name: reading.name,
-            country: reading.country,
-            latitude: reading.latitude,
-            longitude: reading.longitude,
-            observedAt: reading.observedAt,
-            metrics: {
+          data: readings.map((reading) => {
+            const metrics = {
               pm2_5: reading.pm2_5,
               pm10: reading.pm10,
               nitrogen_dioxide: reading.nitrogen_dioxide,
               ozone: reading.ozone,
-            },
-          })),
+            };
+
+            return {
+              stationId: reading.id,
+              name: reading.name,
+              country: reading.country,
+              latitude: reading.latitude,
+              longitude: reading.longitude,
+              observedAt: reading.observedAt,
+              metrics,
+              aqi: computeAqi(metrics),
+            };
+          }),
           meta: {
             from: query.from.toISOString(),
             to: query.to.toISOString(),

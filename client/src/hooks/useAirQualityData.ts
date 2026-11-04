@@ -1,14 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
+import { AQI_CATEGORY_KEYS } from "../lib/aqi";
 import type {
+  AirQualityAqi,
   AirQualityFreshness,
   AirQualityReading,
   AirQualityStation,
+  AqiCategory,
+  MetricKey,
 } from "../types/air-quality";
 
 const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ?? "/api/v1"
 ).replace(/\/+$/, "");
 const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const METRIC_KEYS = [
+  "pm2_5",
+  "pm10",
+  "nitrogen_dioxide",
+  "ozone",
+] as const satisfies readonly MetricKey[];
 
 interface AirQualityDataState {
   requestKey: string;
@@ -46,13 +56,77 @@ function parseStation(value: unknown): AirQualityStation {
   };
 }
 
+function isMetricKey(value: unknown): value is MetricKey {
+  return (
+    typeof value === "string" &&
+    (METRIC_KEYS as readonly string[]).includes(value)
+  );
+}
+
+function isAqiCategory(value: unknown): value is AqiCategory {
+  return (
+    typeof value === "string" &&
+    (AQI_CATEGORY_KEYS as string[]).includes(value)
+  );
+}
+
+function parseNullableIndex(value: unknown): number | null {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error("La API devolvió un índice AQI con formato inválido.");
+  }
+
+  return value;
+}
+
+function parseAqi(value: unknown): AirQualityAqi {
+  if (!isRecord(value) || !isRecord(value.pollutants)) {
+    throw new Error("La API devolvió un índice AQI con formato inválido.");
+  }
+
+  const pollutants: AirQualityAqi["pollutants"] = {
+    pm2_5: null,
+    pm10: null,
+    nitrogen_dioxide: null,
+    ozone: null,
+  };
+  for (const key of METRIC_KEYS) {
+    pollutants[key] = parseNullableIndex(value.pollutants[key]);
+  }
+
+  const index = parseNullableIndex(value.value);
+  let category: AqiCategory | null;
+  if (value.category === null) {
+    category = null;
+  } else if (isAqiCategory(value.category)) {
+    category = value.category;
+  } else {
+    throw new Error("La API devolvió una categoría AQI desconocida.");
+  }
+
+  let dominantPollutant: MetricKey | null;
+  if (value.dominantPollutant === null) {
+    dominantPollutant = null;
+  } else if (isMetricKey(value.dominantPollutant)) {
+    dominantPollutant = value.dominantPollutant;
+  } else {
+    throw new Error("La API devolvió un contaminante dominante inválido.");
+  }
+
+  if (
+    (index === null) !== (category === null) ||
+    (index === null) !== (dominantPollutant === null)
+  ) {
+    throw new Error("La API devolvió un índice AQI incoherente.");
+  }
+
+  return { value: index, category, dominantPollutant, pollutants };
+}
+
 function parseReading(value: unknown): AirQualityReading {
-  const metricKeys = [
-    "pm2_5",
-    "pm10",
-    "nitrogen_dioxide",
-    "ozone",
-  ] as const;
   if (
     !isRecord(value) ||
     !isRecord(value.metrics) ||
@@ -75,7 +149,7 @@ function parseReading(value: unknown): AirQualityReading {
     nitrogen_dioxide: null,
     ozone: null,
   };
-  for (const key of metricKeys) {
+  for (const key of METRIC_KEYS) {
     const metric = value.metrics[key];
     if (
       metric !== null &&
@@ -94,6 +168,7 @@ function parseReading(value: unknown): AirQualityReading {
     longitude: value.longitude,
     observedAt: value.observedAt,
     metrics,
+    aqi: parseAqi(value.aqi),
   };
 }
 

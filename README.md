@@ -47,11 +47,14 @@ Abre la URL que muestra Vite (por defecto `http://localhost:5173`). El proxy de 
 
 ## Interfaz
 
-- Elige PM2.5, PM10, NO₂ u O₃.
+- Elige PM2.5, PM10, NO₂, O₃ o el índice AQI europeo.
 - Filtra todas las estaciones o una ubicación y selecciona una ventana de 6, 24 o 48 horas.
 - Alterna entre HexagonLayer 3D y HeatmapLayer.
 - El mapa encuadra las estaciones con datos y ofrece un botón para recentrar; las métricas y la leyenda se actualizan con los filtros. Si el mapa base no carga, muestra un aviso con reintento.
+- Con el índice AQI seleccionado, el resumen muestra los subíndices por contaminante, la categoría del periodo y el contaminante dominante.
 - El encabezado y el panel de resumen muestran la antigüedad de la última ingesta. Si los datos superan el umbral de frescura, aparece una advertencia y el estado cambia a «Datos desactualizados».
+
+El índice AQI se calcula en el servidor con los umbrales horarios del índice europeo de calidad del aire (EAQI) revisados por la EEA en 2024. El valor global es el mayor de los cuatro subíndices.
 
 Los mapas base usan el estilo Positron de OpenFreeMap y los datos de Open-Meteo. Para ejecución local se requiere acceso a internet para cargar ambos.
 

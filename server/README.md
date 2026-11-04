@@ -53,7 +53,7 @@ Start the server from `server/` with `npm run dev`. The default base URL is `htt
 - `GET /health` is a liveness check: it only confirms that the HTTP server is running.
 - `GET /ready` is a readiness check: it runs `SELECT 1` against the database. It returns `{ "status": "ready" }` on success and HTTP 503 with a `NOT_READY` error when the database is unreachable.
 - `GET /api/v1/stations` returns configured stations with their coordinates.
-- `GET /api/v1/metrics` returns one record per station and hourly timestamp, including coordinates and PM2.5, PM10, NO2, and O3 values. The default time range is the previous 24 hours.
+- `GET /api/v1/metrics` returns one record per station and hourly timestamp, including coordinates, PM2.5, PM10, NO2, and O3 values. Each record also includes the European AQI (`aqi`), computed from the hourly concentrations with the EEA 2024 thresholds. The default time range is the previous 24 hours.
 - `GET /api/v1/freshness` returns the latest observation timestamp, the last successful ingestion, the last attempt, the age in minutes, the configured stale threshold, and `isStale`. Missing ingestion history is treated as stale.
 
 The metrics endpoint accepts these optional query parameters:
@@ -71,6 +71,24 @@ GET /api/v1/metrics?from=2026-11-01T00:00:00Z&to=2026-11-02T00:00:00Z&stationId=
 ```
 
 Successful responses have a `data` array and `meta` with the effective time interval and record count. Invalid query parameters return HTTP 400; unexpected server or database errors return HTTP 500.
+
+Each metrics record includes the consolidated European AQI and one sub-index per pollutant. `value` is the highest sub-index, `category` follows the EAQI bands (good, fair, moderate, poor, very poor, extremely poor), and indexes above 100 are reported as `extremely_poor`:
+
+```json
+{
+  "stationId": "madrid",
+  "observedAt": "2026-11-03T00:00:00.000Z",
+  "metrics": { "pm2_5": 6.3, "pm10": 7.6, "nitrogen_dioxide": 21, "ozone": 40 },
+  "aqi": {
+    "value": 35,
+    "category": "fair",
+    "dominantPollutant": "nitrogen_dioxide",
+    "pollutants": { "pm2_5": 23, "pm10": 10, "nitrogen_dioxide": 35, "ozone": 13 }
+  }
+}
+```
+
+When every pollutant is missing, `value`, `category`, and `dominantPollutant` are `null` and the sub-indices are `null`.
 
 Freshness responses use the same success envelope:
 

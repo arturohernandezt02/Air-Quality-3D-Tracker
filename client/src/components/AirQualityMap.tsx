@@ -7,7 +7,12 @@ import { CircleAlert, LocateFixed } from "lucide-react";
 import { setWorkerUrl } from "maplibre-gl";
 import mapLibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { Map as MapGL, type MapRef } from "react-map-gl/maplibre";
-import type { AirQualityReading, MetricKey } from "../types/air-quality";
+import {
+  AQI_CATEGORY_LABELS,
+  AQI_COLOR_RANGE,
+  getAqiCategory,
+} from "../lib/aqi";
+import type { AirQualityReading, DisplayMetric } from "../types/air-quality";
 
 setWorkerUrl(mapLibreWorkerUrl);
 
@@ -15,7 +20,7 @@ export type MapLayerMode = "hexagon" | "heatmap";
 
 interface AirQualityMapProps {
   readings: AirQualityReading[];
-  metric: MetricKey;
+  metric: DisplayMetric;
   layerMode: MapLayerMode;
   onStationSelect: (stationId: string) => void;
 }
@@ -44,6 +49,7 @@ const COLOR_RANGE: [number, number, number, number][] = [
   [231, 112, 82, 235],
   [158, 53, 66, 245],
 ];
+const AQI_COLOR_DOMAIN: [number, number] = [0, 100];
 
 const INITIAL_VIEW_STATE: MapViewState = {
   longitude: -20,
@@ -68,7 +74,8 @@ export function AirQualityMap({
   const points = useMemo(
     () =>
       readings.flatMap((reading): MetricPoint[] => {
-        const value = reading.metrics[metric];
+        const value =
+          metric === "aqi" ? reading.aqi.value : reading.metrics[metric];
         return value === null
           ? []
           : [{ ...reading, value }];
@@ -105,6 +112,9 @@ export function AirQualityMap({
   }, [points]);
 
   const layers = useMemo(() => {
+    const isAqi = metric === "aqi";
+    const colorRange = isAqi ? AQI_COLOR_RANGE : COLOR_RANGE;
+    const colorDomain = isAqi ? AQI_COLOR_DOMAIN : undefined;
     const dataLayer =
       layerMode === "hexagon"
         ? new HexagonLayer<MetricPoint>({
@@ -126,7 +136,8 @@ export function AirQualityMap({
               shininess: 28,
               specularColor: [60, 60, 60],
             },
-            colorRange: COLOR_RANGE,
+            colorRange,
+            colorDomain,
             pickable: false,
           })
         : new HeatmapLayer<MetricPoint>({
@@ -138,7 +149,8 @@ export function AirQualityMap({
             radiusPixels: 48,
             intensity: 1.15,
             threshold: 0.04,
-            colorRange: COLOR_RANGE,
+            colorRange,
+            colorDomain,
             pickable: false,
           });
 
@@ -165,7 +177,7 @@ export function AirQualityMap({
     });
 
     return [dataLayer, markers];
-  }, [layerMode, onStationSelect, points, stationSummaries]);
+  }, [layerMode, metric, onStationSelect, points, stationSummaries]);
 
   const locationKey = useMemo(
     () =>
@@ -297,9 +309,16 @@ export function AirQualityMap({
         return null;
       }
 
+      if (metric === "aqi") {
+        const value = Math.round(object.average);
+        return `${object.name}, ${object.country} · AQI ${value} (${
+          AQI_CATEGORY_LABELS[getAqiCategory(value)]
+        })`;
+      }
+
       return `${object.name}, ${object.country} · media ${object.average.toFixed(1)} µg/m³`;
     },
-    [],
+    [metric],
   );
 
   return (
