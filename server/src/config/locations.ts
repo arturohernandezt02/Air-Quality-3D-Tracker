@@ -1,3 +1,5 @@
+import { DEFAULT_LOCATIONS } from "./locations-data.js";
+
 export interface AirQualityLocation {
   id: string;
   name: string;
@@ -5,30 +7,6 @@ export interface AirQualityLocation {
   latitude: number;
   longitude: number;
 }
-
-const DEFAULT_LOCATIONS: AirQualityLocation[] = [
-  {
-    id: "mexico-city",
-    name: "Mexico City",
-    country: "Mexico",
-    latitude: 19.4326,
-    longitude: -99.1332,
-  },
-  {
-    id: "madrid",
-    name: "Madrid",
-    country: "Spain",
-    latitude: 40.4168,
-    longitude: -3.7038,
-  },
-  {
-    id: "buenos-aires",
-    name: "Buenos Aires",
-    country: "Argentina",
-    latitude: -34.6037,
-    longitude: -58.3816,
-  },
-];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

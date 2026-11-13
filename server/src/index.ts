@@ -20,6 +20,10 @@ const app = createApp(
     staleAfterMinutes: ingestionConfig.staleAfterMinutes,
   },
 );
+app.log.info(
+  { locations: locations.length },
+  "Air-quality locations loaded.",
+);
 let scheduler: IngestionScheduler | undefined;
 app.addHook("onClose", async () => {
   await scheduler?.stop();

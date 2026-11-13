@@ -15,7 +15,15 @@ npm run dev
 
 El proxy de Vite envía `/api` y `/health` a `http://localhost:3000`. Cambia `VITE_PROXY_TARGET` en `client/.env` si Fastify escucha en otro origen. Puedes establecer `VITE_API_BASE_URL` para apuntar a la base `/api/v1` de un servidor remoto.
 
-El tablero incluye filtros de contaminante, estación y rango de 6, 24 o 48 horas, y un selector entre las capas Hexagon y Heatmap. Requiere que Fastify esté activo y que haya observaciones guardadas; no usa datos falsos como fallback.
+El tablero incluye filtros de contaminante, una búsqueda de ciudad con autocompletado, el rango de 6, 24 o 48 horas y un selector entre las capas Hexagon y Heatmap. Una línea de tiempo permite reproducir la ventana hora a hora; al hacer clic en una estación se abre un panel con su serie temporal y métricas, y el botón de compartir genera una tarjeta PNG. Requiere que Fastify esté activo y que haya observaciones guardadas; no usa datos falsos como fallback.
+
+## Tests
+
+```powershell
+npm test
+```
+
+Vitest ejecuta las pruebas de los helpers puros en `src/lib/` (línea de tiempo, sparkline, filtros y cálculos de resumen). No requieren navegador ni una API activa.
 
 El mapa base carga el estilo Positron de OpenFreeMap; se necesita conexión a internet para ver los tiles.
 

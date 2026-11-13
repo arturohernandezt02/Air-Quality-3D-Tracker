@@ -12,7 +12,11 @@ import {
   AQI_COLOR_RANGE,
   getAqiCategory,
 } from "../lib/aqi";
-import type { AirQualityReading, DisplayMetric } from "../types/air-quality";
+import type {
+  AirQualityReading,
+  AirQualityStation,
+  DisplayMetric,
+} from "../types/air-quality";
 
 setWorkerUrl(mapLibreWorkerUrl);
 
@@ -20,6 +24,7 @@ export type MapLayerMode = "hexagon" | "heatmap";
 
 interface AirQualityMapProps {
   readings: AirQualityReading[];
+  stations: AirQualityStation[];
   metric: DisplayMetric;
   layerMode: MapLayerMode;
   onStationSelect: (stationId: string) => void;
@@ -61,6 +66,7 @@ const INITIAL_VIEW_STATE: MapViewState = {
 
 export function AirQualityMap({
   readings,
+  stations,
   metric,
   layerMode,
   onStationSelect,
@@ -125,11 +131,15 @@ export function AirQualityMap({
             getElevationWeight: (point) => point.value,
             colorAggregation: "MEAN",
             elevationAggregation: "MEAN",
-            radius: 220_000,
+            radius: 140_000,
             elevationScale: 100,
             elevationRange: [0, 1_000],
             extruded: true,
             coverage: 0.88,
+            transitions: {
+              getColorWeight: 300,
+              getElevationWeight: 300,
+            },
             material: {
               ambient: 0.35,
               diffuse: 0.6,
@@ -149,6 +159,7 @@ export function AirQualityMap({
             radiusPixels: 48,
             intensity: 1.15,
             threshold: 0.04,
+            transitions: { getWeight: 300 },
             colorRange,
             colorDomain,
             pickable: false,
@@ -181,23 +192,23 @@ export function AirQualityMap({
 
   const locationKey = useMemo(
     () =>
-      stationSummaries
+      stations
         .map(
           (station) =>
-            `${station.stationId}:${station.latitude}:${station.longitude}`,
+            `${station.id}:${station.latitude}:${station.longitude}`,
         )
         .sort()
         .join("|"),
-    [stationSummaries],
+    [stations],
   );
 
   const fitToStations = useCallback(() => {
-    if (stationSummaries.length === 0 || !mapRef.current) {
+    if (stations.length === 0 || !mapRef.current) {
       return false;
     }
 
-    const longitudes = stationSummaries.map((station) => station.longitude);
-    const latitudes = stationSummaries.map((station) => station.latitude);
+    const longitudes = stations.map((station) => station.longitude);
+    const latitudes = stations.map((station) => station.latitude);
     const west = Math.min(...longitudes);
     const east = Math.max(...longitudes);
     const south = Math.min(...latitudes);
@@ -244,7 +255,7 @@ export function AirQualityMap({
     }));
 
     return true;
-  }, [stationSummaries]);
+  }, [stations]);
 
   useEffect(() => {
     if (!mapLoaded || locationKey === "") {
@@ -316,7 +327,7 @@ export function AirQualityMap({
         })`;
       }
 
-      return `${object.name}, ${object.country} · media ${object.average.toFixed(1)} µg/m³`;
+      return `${object.name}, ${object.country} · ${object.average.toFixed(1)} µg/m³`;
     },
     [metric],
   );
@@ -347,9 +358,9 @@ export function AirQualityMap({
       <button
         type="button"
         onClick={handleFitStations}
-        disabled={stationSummaries.length === 0}
+        disabled={stations.length === 0}
         aria-label="Centrar el mapa en las estaciones"
-        className="absolute bottom-16 right-4 z-10 flex items-center gap-1.5 rounded-lg border border-white/80 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur transition hover:border-teal-300 hover:text-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:bottom-20 md:right-6"
+        className="absolute bottom-36 right-4 z-10 flex items-center gap-1.5 rounded-lg border border-white/80 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-600 shadow-sm backdrop-blur transition hover:border-teal-300 hover:text-teal-700 disabled:cursor-not-allowed disabled:opacity-50 md:bottom-40 md:right-6"
       >
         <LocateFixed size={14} />
         Centrar

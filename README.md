@@ -2,7 +2,7 @@
 
 Proyecto de portafolio para explorar estimaciones horarias de calidad del aire con una API en Fastify, TimescaleDB y un mapa WebGL con React, MapLibre y Deck.gl.
 
-Open-Meteo entrega estimaciones basadas en modelos, no mediciones directas de estaciones. La aplicación comienza con tres ubicaciones de ejemplo —Ciudad de México, Madrid y Buenos Aires— y muestra PM2.5, PM10, NO₂ y O₃.
+Open-Meteo entrega estimaciones basadas en modelos, no mediciones directas de estaciones. La aplicación incluye un catálogo global de 71 ciudades por defecto y muestra PM2.5, PM10, NO₂ y O₃. Puedes reemplazar el catálogo con la variable `AIR_QUALITY_LOCATIONS`.
 
 <img width="1359" height="636" alt="AirQualityGif" src="https://github.com/user-attachments/assets/f2fcaaf3-dc41-407f-87cf-7446e88539ad" />
 
@@ -12,9 +12,9 @@ Open-Meteo entrega estimaciones basadas en modelos, no mediciones directas de es
 - `client/`: aplicación React + Vite con estilos Tailwind, mapa base MapLibre y capas Hexagon/Heatmap de Deck.gl.
 - `docker-compose.yml`: stack completo con TimescaleDB, migración, API y cliente servido por nginx. Cada paquete incluye su `Dockerfile`.
 
-La capa Hexagon agrega las lecturas temporales de cada estación. Con las tres ubicaciones iniciales no hay cobertura espacial densa y las visualizaciones no interpolan valores entre estaciones.
+La capa Hexagon agrega las lecturas horarias de cada ciudad. Las visualizaciones no interpolan valores entre ubicaciones: cada punto representa una estimación modelada en las coordenadas configuradas.
 
-La ingesta descarga 72 horas de datos (dos días anteriores y el día actual) para que el filtro de 48 horas esté cubierto desde la primera ejecución. El servidor la ejecuta al arrancar y después cada 60 minutos por defecto (`INGEST_INTERVAL_MINUTES`). La interfaz muestra la antigüedad de la última ingesta y avisa cuando supera el umbral de frescura.
+La ingesta descarga 72 horas de datos (dos días anteriores y el día actual) para que el filtro de 48 horas esté cubierto desde la primera ejecución. Las coordenadas se solicitan en lotes de 25 y el servidor ejecuta la ingesta al arrancar y después cada 60 minutos por defecto (`INGEST_INTERVAL_MINUTES`). La interfaz muestra la antigüedad de la última ingesta y avisa cuando supera el umbral de frescura.
 
 ## Ejecutar localmente
 
@@ -69,11 +69,14 @@ Puedes cambiar los puertos publicados con `CLIENT_PORT`, `SERVER_PORT` y `POSTGR
 ## Interfaz
 
 - Elige PM2.5, PM10, NO₂, O₃ o el índice AQI europeo.
-- Filtra todas las estaciones o una ubicación y selecciona una ventana de 6, 24 o 48 horas.
+- Busca una ciudad por nombre o país, filtra todas las estaciones y selecciona una ventana de 6, 24 o 48 horas.
+- Reproduce la ventana como una línea de tiempo horaria: play/pausa, arrastre, velocidad 1×/2×/4× y vuelta a «Ahora».
 - Alterna entre HexagonLayer 3D y HeatmapLayer.
 - El mapa encuadra las estaciones con datos y ofrece un botón para recentrar; las métricas y la leyenda se actualizan con los filtros. Si el mapa base no carga, muestra un aviso con reintento.
+- Haz clic en una estación para abrir su detalle con sparkline, media, máximo, mínimo, tendencia, contaminante dominante y un atajo para filtrar el tablero.
 - Con el índice AQI seleccionado, el resumen muestra los subíndices por contaminante, la categoría del periodo y el contaminante dominante.
 - El encabezado y el panel de resumen muestran la antigüedad de la última ingesta. Si los datos superan el umbral de frescura, aparece una advertencia y el estado cambia a «Datos desactualizados».
+- El botón de compartir genera una tarjeta PNG del resumen; en navegadores compatibles abre el diálogo nativo de compartir y, si no, descarga la imagen.
 
 El índice AQI se calcula en el servidor con los umbrales horarios del índice europeo de calidad del aire (EAQI) revisados por la EEA en 2024. El valor global es el mayor de los cuatro subíndices.
 
@@ -89,6 +92,7 @@ Pop-Location
 
 Push-Location client
 npm run build
+npm test
 npm run lint
 Pop-Location
 ```

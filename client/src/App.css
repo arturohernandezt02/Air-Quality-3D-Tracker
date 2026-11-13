@@ -184,12 +184,28 @@
   }
 
   .map-legend {
-    bottom: 12px;
+    bottom: 84px;
     left: 12px;
   }
 
   .map-attribution {
     right: 12px;
-    bottom: 12px;
+    bottom: 84px;
   }
+
+  .station-drawer {
+    top: auto;
+    right: 12px;
+    bottom: 84px;
+    left: 12px;
+    width: auto;
+    max-height: 52vh;
+  }
+}
+
+.share-card-offscreen {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  pointer-events: none;
 }
