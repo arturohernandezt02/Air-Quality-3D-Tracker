@@ -184,12 +184,13 @@
   }
 
   .map-legend {
-    bottom: 12px;
+    bottom: 84px;
     left: 12px;
   }
 
   .map-attribution {
     right: 12px;
-    bottom: 12px;
+    bottom: 84px;
   }
+
 }

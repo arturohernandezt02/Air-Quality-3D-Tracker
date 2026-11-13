@@ -8,6 +8,13 @@ export interface AirQualityStation {
 
 export type MetricKey = "pm2_5" | "pm10" | "nitrogen_dioxide" | "ozone";
 
+export const METRIC_KEYS = [
+  "pm2_5",
+  "pm10",
+  "nitrogen_dioxide",
+  "ozone",
+] as const satisfies readonly MetricKey[];
+
 export type AqiCategory =
   | "good"
   | "fair"
