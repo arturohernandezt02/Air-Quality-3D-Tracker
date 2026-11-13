@@ -41,6 +41,7 @@ import {
 import type { MapLayerMode } from "./components/AirQualityMap";
 import { StationCombobox } from "./components/StationCombobox";
 import { StationDetail } from "./components/StationDetail";
+import { ShareButton } from "./components/ShareButton";
 import { TimelineControls } from "./components/TimelineControls";
 import "./App.css";
 
@@ -186,6 +187,28 @@ function App() {
           ),
     [readings, selectedStationId],
   );
+  const shareStation =
+    stationId === "all"
+      ? null
+      : stations.find((station) => station.id === stationId) ?? null;
+  const shareCategory =
+    isAqi && average !== null ? getAqiCategory(average) : null;
+  const shareData = {
+    title: shareStation?.name ?? "Vista global",
+    subtitle:
+      shareStation?.country ??
+      `${stationCount} de ${stations.length} ubicaciones con datos`,
+    metricLabel: activeMetric.label,
+    value: formatNumber(average, isAqi ? 0 : 1),
+    unit: activeMetric.unit,
+    categoryLabel:
+      shareCategory === null ? null : AQI_CATEGORY_LABELS[shareCategory],
+    timestampLabel:
+      activeTimestamp === null
+        ? null
+        : formatObservationTime(activeTimestamp),
+    readingCount: activeReadings.length,
+  };
 
   const handleStationSelect = useCallback((nextStationId: string) => {
     setStationId(nextStationId);
@@ -319,6 +342,7 @@ function App() {
               </span>
             )
           )}
+          <ShareButton data={shareData} />
           <button
             type="button"
             onClick={refresh}

@@ -202,3 +202,10 @@
     max-height: 52vh;
   }
 }
+
+.share-card-offscreen {
+  position: fixed;
+  top: 0;
+  left: -10000px;
+  pointer-events: none;
+}
