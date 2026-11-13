@@ -2,7 +2,11 @@ import type { Kysely } from "kysely";
 import { sql } from "kysely";
 import type { AirQualityLocation } from "../config/locations.js";
 import type { AirQualityDatabase } from "../db/types.js";
-import { fetchHourlyObservations } from "./open-meteo.js";
+import {
+  fetchHourlyObservationsBatch,
+  LOCATION_BATCH_SIZE,
+  type LocationObservations,
+} from "./open-meteo.js";
 
 export interface LocationIngestionResult {
   locationId: string;
@@ -15,6 +19,39 @@ export interface IngestionResult {
   completedAt: Date;
   locations: LocationIngestionResult[];
   readingCount: number;
+}
+
+export type BatchFetcher = (
+  locations: AirQualityLocation[],
+) => Promise<LocationObservations[]>;
+
+export function chunkLocations(
+  locations: AirQualityLocation[],
+  batchSize = LOCATION_BATCH_SIZE,
+): AirQualityLocation[][] {
+  if (!Number.isInteger(batchSize) || batchSize < 1) {
+    throw new Error("Batch size must be a positive integer.");
+  }
+
+  const batches: AirQualityLocation[][] = [];
+  for (let index = 0; index < locations.length; index += batchSize) {
+    batches.push(locations.slice(index, index + batchSize));
+  }
+
+  return batches;
+}
+
+export async function fetchObservationsForLocations(
+  locations: AirQualityLocation[],
+  fetchBatch: BatchFetcher = (batch) => fetchHourlyObservationsBatch(batch),
+): Promise<LocationObservations[]> {
+  const results: LocationObservations[] = [];
+
+  for (const batch of chunkLocations(locations)) {
+    results.push(...await fetchBatch(batch));
+  }
+
+  return results;
 }
 
 async function recordSuccess(
@@ -67,17 +104,21 @@ export async function ingestAirQualityData(
   database: Kysely<AirQualityDatabase>,
   locations: AirQualityLocation[],
   now: () => Date = () => new Date(),
+  fetchBatch?: BatchFetcher,
 ): Promise<IngestionResult> {
+  if (locations.length === 0) {
+    throw new Error("At least one location is required for ingestion.");
+  }
+
   const startedAt = now();
-  const locationResults: LocationIngestionResult[] = [];
-  let readingCount = 0;
+  let fetched: LocationObservations[];
 
   try {
-    for (const location of locations) {
-      const observations = await fetchHourlyObservations(location);
-      const ingestedAt = now();
+    fetched = await fetchObservationsForLocations(locations, fetchBatch);
+    const ingestedAt = now();
 
-      await database.transaction().execute(async (transaction) => {
+    await database.transaction().execute(async (transaction) => {
+      for (const { location, observations } of fetched) {
         await transaction
           .insertInto("stations")
           .values(location)
@@ -91,6 +132,10 @@ export async function ingestAirQualityData(
             }),
           )
           .execute();
+
+        if (observations.length === 0) {
+          continue;
+        }
 
         await transaction
           .insertInto("air_quality_readings")
@@ -117,15 +162,8 @@ export async function ingestAirQualityData(
               }),
           )
           .execute();
-      });
-
-      readingCount += observations.length;
-      locationResults.push({
-        locationId: location.id,
-        locationName: location.name,
-        readingCount: observations.length,
-      });
-    }
+      }
+    });
   } catch (error) {
     await recordFailure(database, startedAt, error).catch(() => {
       // Preserve the original ingestion error if status recording also fails.
@@ -136,8 +174,15 @@ export async function ingestAirQualityData(
   const result: IngestionResult = {
     startedAt,
     completedAt: now(),
-    locations: locationResults,
-    readingCount,
+    locations: fetched.map(({ location, observations }) => ({
+      locationId: location.id,
+      locationName: location.name,
+      readingCount: observations.length,
+    })),
+    readingCount: fetched.reduce(
+      (total, { observations }) => total + observations.length,
+      0,
+    ),
   };
 
   await recordSuccess(database, result);
