@@ -39,6 +39,8 @@ import {
   type DisplayMetric,
 } from "./types/air-quality";
 import type { MapLayerMode } from "./components/AirQualityMap";
+import { StationCombobox } from "./components/StationCombobox";
+import { StationDetail } from "./components/StationDetail";
 import { TimelineControls } from "./components/TimelineControls";
 import "./App.css";
 
@@ -89,6 +91,9 @@ function App() {
   const [metric, setMetric] = useState<DisplayMetric>("pm2_5");
   const [stationId, setStationId] = useState("all");
   const [layerMode, setLayerMode] = useState<MapLayerMode>("hexagon");
+  const [selectedStationId, setSelectedStationId] = useState<string | null>(
+    null,
+  );
   const [frameIndex, setFrameIndex] = useState<number | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -168,9 +173,23 @@ function App() {
   }, [activeReadings, isAqi]);
   const latestObservation =
     activeTimestamp === null ? null : new Date(activeTimestamp);
+  const selectedStation =
+    selectedStationId === null
+      ? null
+      : stations.find((station) => station.id === selectedStationId) ?? null;
+  const selectedStationReadings = useMemo(
+    () =>
+      selectedStationId === null
+        ? []
+        : readings.filter(
+            (reading) => reading.stationId === selectedStationId,
+          ),
+    [readings, selectedStationId],
+  );
 
   const handleStationSelect = useCallback((nextStationId: string) => {
     setStationId(nextStationId);
+    setSelectedStationId(null);
     setFrameIndex(null);
     setIsPlaying(false);
   }, []);
@@ -180,6 +199,27 @@ function App() {
     setFrameIndex(null);
     setIsPlaying(false);
   }, []);
+
+  const handleMapStationSelect = useCallback((nextStationId: string) => {
+    setSelectedStationId(nextStationId);
+  }, []);
+
+  const handleCloseStation = useCallback(() => {
+    setSelectedStationId(null);
+  }, []);
+
+  const handleFilterStation = useCallback(() => {
+    if (selectedStationId === null) {
+      return;
+    }
+
+    setStationId((current) =>
+      current === selectedStationId ? "all" : selectedStationId,
+    );
+    setSelectedStationId(null);
+    setFrameIndex(null);
+    setIsPlaying(false);
+  }, [selectedStationId]);
 
   const handleScrub = useCallback((index: number) => {
     setFrameIndex(index);
@@ -349,19 +389,12 @@ function App() {
             >
               Ubicación
             </label>
-            <select
+            <StationCombobox
               id="station-select"
+              stations={stations}
               value={stationId}
-              onChange={(event) => handleStationSelect(event.target.value)}
-              className="control-select w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-medium text-slate-800 outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-100"
-            >
-              <option value="all">Todas las ubicaciones</option>
-              {stations.map((station) => (
-                <option key={station.id} value={station.id}>
-                  {station.name}, {station.country}
-                </option>
-              ))}
-            </select>
+              onChange={handleStationSelect}
+            />
           </section>
 
           <section aria-labelledby="time-heading">
@@ -675,7 +708,7 @@ function App() {
               }
               metric={metric}
               layerMode={layerMode}
-              onStationSelect={handleStationSelect}
+              onStationSelect={handleMapStationSelect}
             />
           </Suspense>
 
@@ -690,6 +723,18 @@ function App() {
             onSpeedChange={setSpeed}
             onGoLive={handleGoLive}
           />
+
+          {selectedStation !== null && (
+            <StationDetail
+              station={selectedStation}
+              readings={selectedStationReadings}
+              metric={metric}
+              isAqi={isAqi}
+              isFiltered={stationId === selectedStation.id}
+              onClose={handleCloseStation}
+              onFilter={handleFilterStation}
+            />
+          )}
 
           <div className="map-title-card absolute left-4 top-4 z-10 rounded-xl border border-white/80 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:left-6 md:top-6">
             <div className="flex items-center gap-2">
