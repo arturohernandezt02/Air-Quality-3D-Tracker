@@ -1,8 +1,8 @@
 # Air Quality Tracker server
 
-The server ingests hourly air-quality data from the Open-Meteo Air Quality API into TimescaleDB. The initial locations are Mexico City, Madrid, and Buenos Aires; set `AIR_QUALITY_LOCATIONS` in `.env` to replace them with a non-empty JSON array of locations.
+The server ingests hourly air-quality data from the Open-Meteo Air Quality API into TimescaleDB. It ships with a default catalogue of 71 major cities across Europe, the Americas, Asia, Africa, and Oceania; set `AIR_QUALITY_LOCATIONS` in `.env` to replace it with a non-empty JSON array of locations.
 
-Open-Meteo supplies model-based estimates and forecasts, not direct readings from local monitoring stations. Each ingestion requests 72 hours (the two previous days plus the current day) of hourly PM2.5, PM10, nitrogen dioxide (NO2), and ozone (O3) data in UTC, so the dashboard's 48-hour window is covered from the first run. Re-running ingestion upserts by station and timestamp, so duplicate runs do not create duplicate readings.
+Open-Meteo supplies model-based estimates and forecasts, not direct readings from local monitoring stations. Each ingestion requests 72 hours (the two previous days plus the current day) of hourly PM2.5, PM10, nitrogen dioxide (NO2), and ozone (O3) data in UTC, so the dashboard's 48-hour window is covered from the first run. Coordinates are requested in batches of 25 and persisted in a single transaction, so a failed run does not leave a partial dataset. Re-running ingestion upserts by station and timestamp, so duplicate runs do not create duplicate readings.
 
 ## Run locally
 
