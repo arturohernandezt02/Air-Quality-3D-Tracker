@@ -2,6 +2,14 @@ import type { AirQualityLocation } from "../config/locations.js";
 
 const AIR_QUALITY_API_URL =
   "https://air-quality-api.open-meteo.com/v1/air-quality";
+const HOURLY_VARIABLES = "pm2_5,pm10,nitrogen_dioxide,ozone";
+const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Number of coordinates sent in a single Open-Meteo request. Keeping batches
+ * small keeps the response payload predictable and avoids oversized URLs.
+ */
+export const LOCATION_BATCH_SIZE = 25;
 
 export interface HourlyObservation {
   observedAt: Date;
@@ -10,6 +18,16 @@ export interface HourlyObservation {
   nitrogen_dioxide: number | null;
   ozone: number | null;
 }
+
+export interface LocationObservations {
+  location: AirQualityLocation;
+  observations: HourlyObservation[];
+}
+
+export type FetchLike = (
+  input: string | URL,
+  init?: RequestInit,
+) => Promise<Response>;
 
 interface HourlyResponse {
   time: number[];
@@ -95,11 +113,43 @@ export function parseHourlyObservations(payload: unknown): HourlyObservation[] {
   });
 }
 
-export function buildAirQualityUrl(location: AirQualityLocation): URL {
+/**
+ * Open-Meteo returns a single object for one coordinate and an array of
+ * objects (in request order) for multiple coordinates.
+ */
+export function parseBatchObservations(
+  payload: unknown,
+  locationCount: number,
+): HourlyObservation[][] {
+  if (!Number.isInteger(locationCount) || locationCount < 1) {
+    throw new Error("At least one location is required to parse a batch response.");
+  }
+
+  const entries = Array.isArray(payload) ? payload : [payload];
+  if (entries.length !== locationCount) {
+    throw new Error(
+      `Open-Meteo returned ${entries.length} location payloads for ${locationCount} requested locations.`,
+    );
+  }
+
+  return entries.map(parseHourlyObservations);
+}
+
+function buildAirQualityUrlFor(locations: AirQualityLocation[]): URL {
+  if (locations.length === 0) {
+    throw new Error("At least one location is required to build a request.");
+  }
+
   const url = new URL(AIR_QUALITY_API_URL);
-  url.searchParams.set("latitude", String(location.latitude));
-  url.searchParams.set("longitude", String(location.longitude));
-  url.searchParams.set("hourly", "pm2_5,pm10,nitrogen_dioxide,ozone");
+  url.searchParams.set(
+    "latitude",
+    locations.map((location) => String(location.latitude)).join(","),
+  );
+  url.searchParams.set(
+    "longitude",
+    locations.map((location) => String(location.longitude)).join(","),
+  );
+  url.searchParams.set("hourly", HOURLY_VARIABLES);
   // Request 72 hours (the two previous days plus the current day) so the
   // client's 48-hour window is fully covered even on the first ingestion.
   url.searchParams.set("past_days", "2");
@@ -110,16 +160,33 @@ export function buildAirQualityUrl(location: AirQualityLocation): URL {
   return url;
 }
 
-export async function fetchHourlyObservations(
-  location: AirQualityLocation,
-): Promise<HourlyObservation[]> {
-  const url = buildAirQualityUrl(location);
-  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+export function buildAirQualityUrl(location: AirQualityLocation): URL {
+  return buildAirQualityUrlFor([location]);
+}
+
+export function buildAirQualityUrlBatch(
+  locations: AirQualityLocation[],
+): URL {
+  return buildAirQualityUrlFor(locations);
+}
+
+export async function fetchHourlyObservationsBatch(
+  locations: AirQualityLocation[],
+  fetcher: FetchLike = fetch,
+): Promise<LocationObservations[]> {
+  if (locations.length === 0) {
+    return [];
+  }
+
+  const url = buildAirQualityUrlBatch(locations);
+  const response = await fetcher(url, {
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   const responseBody = await response.text();
 
   if (!response.ok) {
     throw new Error(
-      `Open-Meteo request for ${location.id} failed with HTTP ${response.status}: ${responseBody.slice(0, 300)}`,
+      `Open-Meteo batch request for ${locations.length} location(s) failed with HTTP ${response.status}: ${responseBody.slice(0, 300)}`,
     );
   }
 
@@ -127,10 +194,26 @@ export async function fetchHourlyObservations(
   try {
     payload = JSON.parse(responseBody);
   } catch (error) {
-    throw new Error(`Open-Meteo returned invalid JSON for ${location.id}.`, {
+    throw new Error("Open-Meteo returned invalid JSON for a location batch.", {
       cause: error,
     });
   }
 
-  return parseHourlyObservations(payload);
+  const observationsByLocation = parseBatchObservations(
+    payload,
+    locations.length,
+  );
+
+  return locations.map((location, index) => ({
+    location,
+    observations: observationsByLocation[index],
+  }));
+}
+
+export async function fetchHourlyObservations(
+  location: AirQualityLocation,
+  fetcher: FetchLike = fetch,
+): Promise<HourlyObservation[]> {
+  const [result] = await fetchHourlyObservationsBatch([location], fetcher);
+  return result.observations;
 }
