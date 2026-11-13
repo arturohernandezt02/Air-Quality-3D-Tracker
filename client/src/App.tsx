@@ -1,4 +1,11 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   Activity,
   AlertCircle,
@@ -19,13 +26,20 @@ import {
   getAqiCategory,
 } from "./lib/aqi";
 import {
+  formatNumber,
+  getAverage,
+  getDominantPollutant,
+  getPeak,
+  getPollutantBreakdown,
+} from "./lib/readings";
+import { buildTimeline, formatObservationTime } from "./lib/timeline";
+import {
   DISPLAY_METRIC_OPTIONS,
   METRIC_OPTIONS,
-  type AirQualityReading,
   type DisplayMetric,
-  type MetricKey,
 } from "./types/air-quality";
 import type { MapLayerMode } from "./components/AirQualityMap";
+import { TimelineControls } from "./components/TimelineControls";
 import "./App.css";
 
 const AirQualityMap = lazy(() =>
@@ -39,52 +53,6 @@ const TIME_RANGES = [
   { hours: 24, label: "24 h" },
   { hours: 48, label: "48 h" },
 ];
-
-function getReadingValue(
-  reading: AirQualityReading,
-  metric: DisplayMetric,
-): number | null {
-  return metric === "aqi" ? reading.aqi.value : reading.metrics[metric];
-}
-
-function getAverage(readings: AirQualityReading[], metric: DisplayMetric) {
-  const values = readings
-    .map((reading) => getReadingValue(reading, metric))
-    .filter((value): value is number => value !== null);
-
-  if (values.length === 0) {
-    return null;
-  }
-
-  return values.reduce((total, value) => total + value, 0) / values.length;
-}
-
-function getPeak(readings: AirQualityReading[], metric: DisplayMetric) {
-  const values = readings
-    .map((reading) => getReadingValue(reading, metric))
-    .filter((value): value is number => value !== null);
-
-  return values.length === 0 ? null : Math.max(...values);
-}
-
-function getAverageSubIndex(
-  readings: AirQualityReading[],
-  metric: MetricKey,
-) {
-  const values = readings
-    .map((reading) => reading.aqi.pollutants[metric])
-    .filter((value): value is number => value !== null);
-
-  if (values.length === 0) {
-    return null;
-  }
-
-  return values.reduce((total, value) => total + value, 0) / values.length;
-}
-
-function formatValue(value: number | null, digits = 1) {
-  return value === null ? "—" : value.toFixed(digits);
-}
 
 function formatAge(ageMinutes: number | null) {
   if (ageMinutes === null) {
@@ -121,70 +89,123 @@ function App() {
   const [metric, setMetric] = useState<DisplayMetric>("pm2_5");
   const [stationId, setStationId] = useState("all");
   const [layerMode, setLayerMode] = useState<MapLayerMode>("hexagon");
+  const [frameIndex, setFrameIndex] = useState<number | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const { stations, readings, freshness, isLoading, error, updatedAt, refresh } =
     useAirQualityData(rangeHours, stationId);
   const dataIsStale = freshness?.isStale === true;
   const isAqi = metric === "aqi";
 
+  const timelineFrames = useMemo(() => buildTimeline(readings), [readings]);
+  const liveFrameIndex = timelineFrames.length - 1;
+  const activeFrameIndex =
+    frameIndex === null ? liveFrameIndex : Math.min(frameIndex, liveFrameIndex);
+  const activeFrame =
+    activeFrameIndex >= 0 ? timelineFrames[activeFrameIndex] : undefined;
+  const activeReadings = useMemo(
+    () =>
+      activeFrameIndex >= 0
+        ? timelineFrames[activeFrameIndex]?.readings ?? []
+        : [],
+    [activeFrameIndex, timelineFrames],
+  );
+  const activeTimestamp = activeFrame?.timestamp ?? null;
+  const isLive = frameIndex === null;
+  const isPlaybackActive = isPlaying && timelineFrames.length >= 2;
+
+  useEffect(() => {
+    if (!isPlaybackActive) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setFrameIndex((current) => {
+        const index = current === null ? timelineFrames.length - 1 : current;
+        const next = index + 1;
+        return next >= timelineFrames.length ? 0 : next;
+      });
+    }, 900 / speed);
+
+    return () => window.clearInterval(intervalId);
+  }, [isPlaybackActive, speed, timelineFrames.length]);
+
   const activeMetric =
     DISPLAY_METRIC_OPTIONS.find((option) => option.key === metric) ??
     DISPLAY_METRIC_OPTIONS[0];
   const stationCount = useMemo(
-    () => new Set(readings.map((reading) => reading.stationId)).size,
-    [readings],
+    () => new Set(activeReadings.map((reading) => reading.stationId)).size,
+    [activeReadings],
   );
   const average = useMemo(
-    () => getAverage(readings, metric),
-    [metric, readings],
+    () => getAverage(activeReadings, metric),
+    [activeReadings, metric],
   );
-  const peak = useMemo(() => getPeak(readings, metric), [metric, readings]);
+  const peak = useMemo(
+    () => getPeak(activeReadings, metric),
+    [activeReadings, metric],
+  );
   const averageAqiCategory =
     isAqi && average !== null ? getAqiCategory(average) : null;
   const peakAqiCategory = isAqi && peak !== null ? getAqiCategory(peak) : null;
   const pollutantBreakdown = useMemo(
     () =>
-      METRIC_OPTIONS.map((option) => ({
-        option,
-        value: getAverageSubIndex(readings, option.key),
+      getPollutantBreakdown(activeReadings).map((entry) => ({
+        option:
+          METRIC_OPTIONS.find((option) => option.key === entry.metric) ??
+          METRIC_OPTIONS[0],
+        value: entry.value,
       })),
-    [readings],
+    [activeReadings],
   );
   const dominantPollutant = useMemo(() => {
     if (!isAqi) {
       return null;
     }
 
-    let best: {
-      option: (typeof pollutantBreakdown)[number]["option"];
-      value: number;
-    } | null = null;
+    const key = getDominantPollutant(activeReadings);
+    return METRIC_OPTIONS.find((option) => option.key === key) ?? null;
+  }, [activeReadings, isAqi]);
+  const latestObservation =
+    activeTimestamp === null ? null : new Date(activeTimestamp);
 
-    for (const entry of pollutantBreakdown) {
-      if (entry.value === null) {
-        continue;
-      }
+  const handleStationSelect = useCallback((nextStationId: string) => {
+    setStationId(nextStationId);
+    setFrameIndex(null);
+    setIsPlaying(false);
+  }, []);
 
-      if (best === null || entry.value > best.value) {
-        best = { option: entry.option, value: entry.value };
-      }
+  const handleRangeChange = useCallback((hours: number) => {
+    setRangeHours(hours);
+    setFrameIndex(null);
+    setIsPlaying(false);
+  }, []);
+
+  const handleScrub = useCallback((index: number) => {
+    setFrameIndex(index);
+    setIsPlaying(false);
+  }, []);
+
+  const handleTogglePlay = useCallback(() => {
+    if (timelineFrames.length < 2) {
+      return;
     }
 
-    return best?.option ?? null;
-  }, [isAqi, pollutantBreakdown]);
-  const latestObservation = useMemo(() => {
-    const latest = readings.reduce<string | null>(
-      (current, reading) =>
-        current === null || reading.observedAt > current
-          ? reading.observedAt
-          : current,
-      null,
-    );
+    if (!isPlaybackActive) {
+      if (isLive) {
+        setFrameIndex(0);
+      }
+      setIsPlaying(true);
+      return;
+    }
 
-    return latest === null ? null : new Date(latest);
-  }, [readings]);
-  const handleStationSelect = (nextStationId: string) => {
-    setStationId(nextStationId);
-  };
+    setIsPlaying(false);
+  }, [isLive, isPlaybackActive, timelineFrames.length]);
+
+  const handleGoLive = useCallback(() => {
+    setFrameIndex(null);
+    setIsPlaying(false);
+  }, []);
 
   return (
     <main className="min-h-screen bg-[#f7f8f6] text-slate-900">
@@ -361,7 +382,7 @@ function App() {
                   type="button"
                   key={timeRange.hours}
                   aria-pressed={rangeHours === timeRange.hours}
-                  onClick={() => setRangeHours(timeRange.hours)}
+                  onClick={() => handleRangeChange(timeRange.hours)}
                   className={`rounded-lg px-2 py-2 text-xs font-semibold transition ${
                     rangeHours === timeRange.hours
                       ? "bg-white text-teal-800 shadow-sm"
@@ -430,10 +451,13 @@ function App() {
                 </h2>
                 <p className="mt-1 text-[11px] text-slate-400">
                   {activeMetric.label} · {activeMetric.unit}
+                  {!isLive && activeTimestamp !== null
+                    ? ` · ${formatObservationTime(activeTimestamp)}`
+                    : ""}
                 </p>
               </div>
               <span className="rounded-md bg-white px-2 py-1 text-[10px] font-medium text-slate-400 shadow-sm ring-1 ring-slate-200/70">
-                {readings.length} lecturas
+                {activeReadings.length} lecturas
               </span>
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -443,7 +467,7 @@ function App() {
                   Promedio
                 </div>
                 <p className="text-xl font-semibold tracking-tight text-slate-900">
-                  {formatValue(average, isAqi ? 0 : 1)}
+                  {formatNumber(average, isAqi ? 0 : 1)}
                   <span className="ml-1 text-[10px] font-medium text-slate-400">
                     {activeMetric.unit}
                   </span>
@@ -468,7 +492,7 @@ function App() {
                   Máximo
                 </div>
                 <p className="text-xl font-semibold tracking-tight text-slate-900">
-                  {formatValue(peak, isAqi ? 0 : 1)}
+                  {formatNumber(peak, isAqi ? 0 : 1)}
                   <span className="ml-1 text-[10px] font-medium text-slate-400">
                     {activeMetric.unit}
                   </span>
@@ -514,7 +538,7 @@ function App() {
                           {option.shortLabel}
                         </span>
                         <span className="text-[11px] font-semibold text-slate-700">
-                          {formatValue(value, 0)}
+                          {formatNumber(value, 0)}
                         </span>
                       </div>
                     );
@@ -643,12 +667,29 @@ function App() {
             }
           >
             <AirQualityMap
-              readings={readings}
+              readings={activeReadings}
+              stations={
+                stationId === "all"
+                  ? stations
+                  : stations.filter((station) => station.id === stationId)
+              }
               metric={metric}
               layerMode={layerMode}
               onStationSelect={handleStationSelect}
             />
           </Suspense>
+
+          <TimelineControls
+            frames={timelineFrames}
+            activeIndex={Math.max(activeFrameIndex, 0)}
+            isPlaying={isPlaybackActive}
+            isLive={isLive}
+            speed={speed}
+            onScrub={handleScrub}
+            onTogglePlay={handleTogglePlay}
+            onSpeedChange={setSpeed}
+            onGoLive={handleGoLive}
+          />
 
           <div className="map-title-card absolute left-4 top-4 z-10 rounded-xl border border-white/80 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:left-6 md:top-6">
             <div className="flex items-center gap-2">
@@ -660,7 +701,12 @@ function App() {
                   Distribución global
                 </p>
                 <p className="mt-0.5 text-[10px] text-slate-400">
-                  {activeMetric.label} · {rangeHours} horas
+                  {activeMetric.label} ·{" "}
+                  {isLive
+                    ? `${rangeHours} horas`
+                    : activeTimestamp !== null
+                      ? formatObservationTime(activeTimestamp)
+                      : `${rangeHours} horas`}
                 </p>
               </div>
             </div>
@@ -685,7 +731,7 @@ function App() {
             </span>
           </div>
 
-          <div className="map-legend absolute bottom-5 left-4 z-10 rounded-xl border border-white/80 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:bottom-7 md:left-6">
+          <div className="map-legend absolute bottom-20 left-4 z-10 rounded-xl border border-white/80 bg-white/95 px-4 py-3 shadow-sm backdrop-blur md:bottom-24 md:left-6">
             <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
               {isAqi ? "Índice AQI · EAQI" : `Concentración · ${activeMetric.unit}`}
             </p>
@@ -717,7 +763,7 @@ function App() {
             )}
           </div>
 
-          <div className="map-attribution absolute bottom-5 right-4 z-10 rounded-md bg-white/85 px-2 py-1 text-[10px] text-slate-500 backdrop-blur md:bottom-7 md:right-6">
+          <div className="map-attribution absolute bottom-20 right-4 z-10 rounded-md bg-white/85 px-2 py-1 text-[10px] text-slate-500 backdrop-blur md:bottom-24 md:right-6">
             OpenStreetMap · OpenFreeMap
           </div>
         </section>

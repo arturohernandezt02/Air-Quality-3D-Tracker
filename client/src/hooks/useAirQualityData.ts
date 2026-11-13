@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { AQI_CATEGORY_KEYS } from "../lib/aqi";
+import { METRIC_KEYS } from "../types/air-quality";
 import type {
   AirQualityAqi,
   AirQualityFreshness,
@@ -13,12 +14,6 @@ const API_BASE_URL = (
   import.meta.env.VITE_API_BASE_URL ?? "/api/v1"
 ).replace(/\/+$/, "");
 const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-const METRIC_KEYS = [
-  "pm2_5",
-  "pm10",
-  "nitrogen_dioxide",
-  "ozone",
-] as const satisfies readonly MetricKey[];
 
 interface AirQualityDataState {
   requestKey: string;
